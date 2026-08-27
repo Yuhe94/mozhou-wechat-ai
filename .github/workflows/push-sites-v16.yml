@@ -1,0 +1,46 @@
+name: Push Sites v1.6 source
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out public source
+        uses: actions/checkout@v4
+
+      - name: Push exact v1.6 source to Sites
+        env:
+          SITES_TOKEN: ${{ secrets.SITES_SOURCE_TOKEN_V16 }}
+          SITES_REMOTE: https://git.chatgpt-team.site/1303141e-f6c1-4f00-b6ec-36c4185637aa/appgprj_6a8fbe951f0081918149fdf47ef82e9c.git
+        run: |
+          set -euo pipefail
+
+          source_dir="$RUNNER_TEMP/mozhou-source-v16"
+          sites_dir="$RUNNER_TEMP/mozhou-sites-repo"
+          rm -rf "$source_dir" "$sites_dir"
+          mkdir -p "$source_dir" "$sites_dir"
+          unzip -oq mozhou-source-v1.6.zip -d "$source_dir"
+
+          git init "$sites_dir"
+          git -C "$sites_dir" config user.name "github-actions[bot]"
+          git -C "$sites_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          auth_header="Authorization: Bearer ${SITES_TOKEN}"
+          if git -C "$sites_dir" -c http.extraHeader="$auth_header" fetch "$SITES_REMOTE" main; then
+            git -C "$sites_dir" checkout -B main FETCH_HEAD
+          else
+            git -C "$sites_dir" checkout --orphan main
+          fi
+
+          rsync -a --delete --exclude=.git/ "$source_dir"/ "$sites_dir"/
+          git -C "$sites_dir" add -A
+          git -C "$sites_dir" commit --allow-empty -m "Deploy Mozhou v1.6"
+          commit_sha="$(git -C "$sites_dir" rev-parse HEAD)"
+          git -C "$sites_dir" -c http.extraHeader="$auth_header" push "$SITES_REMOTE" refs/heads/main:refs/heads/main
+
+          echo "Sites source commit: $commit_sha" >> "$GITHUB_STEP_SUMMARY"
+          echo "SITES_COMMIT_SHA=$commit_sha"
