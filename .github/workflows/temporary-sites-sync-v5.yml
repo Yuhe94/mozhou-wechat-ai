@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      TARGET_SHA: 527fe29bc446e8a1b2cbd38d5df897a55f409e64
+      TARGET_SHA: a3afeec86c3a6573289716952ea774bffdf4ff28
       SITES_REMOTE_URL: https://git.chatgpt-team.site/1303141e-f6c1-4f00-b6ec-36c4185637aa/appgprj_6a8fbe951f0081918149fdf47ef82e9c.git
     steps:
       - name: Fetch exact GitHub source
@@ -26,7 +26,7 @@ jobs:
 
       - name: Push exact source to Sites
         env:
-          SITES_SOURCE_TOKEN: ${{ secrets.SITES_SOURCE_TOKEN_V6 }}
+          SITES_SOURCE_TOKEN: ${{ secrets.SITES_SOURCE_TOKEN_V7 }}
         run: |
           test -n "${SITES_SOURCE_TOKEN}"
           cd source
