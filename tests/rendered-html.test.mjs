@@ -64,6 +64,62 @@ test("rejects private-network custom AI endpoints before connecting", async () =
   assert.match(payload.error, /API 地址必须指向公网服务/);
 });
 
+test("uses a native guarded POST for OpenAI-compatible providers", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  globalThis.fetch = async (input, init) => {
+    captured = { url: String(input), init };
+    return Response.json({ choices: [{ message: { content: "正常" } }] });
+  };
+  try {
+    const response = await request("/api/provider-test", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-mozhou-text-provider": "custom",
+        "x-mozhou-text-base-url": "https://provider.example.com/v1",
+        "x-mozhou-text-model": "compatible-model",
+        "x-mozhou-text-api-key": "test-key",
+      },
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(captured.url, "https://provider.example.com/v1/chat/completions");
+    assert.equal(captured.init.method, "POST");
+    assert.equal(captured.init.redirect, "manual");
+    assert.equal(captured.init.headers.authorization, "Bearer test-key");
+    assert.equal(JSON.parse(captured.init.body).model, "compatible-model");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("returns upstream HTTP errors without exposing API keys", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({ error: { message: "Invalid key sk-supersecret1234" } }, { status: 401 });
+  try {
+    const response = await request("/api/provider-test", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-mozhou-text-provider": "custom",
+        "x-mozhou-text-base-url": "https://provider.example.com/v1",
+        "x-mozhou-text-model": "compatible-model",
+        "x-mozhou-text-api-key": "test-key",
+      },
+      body: "{}",
+    });
+    assert.equal(response.status, 400);
+    const payload = await response.json();
+    assert.match(payload.error, /HTTP 401/);
+    assert.match(payload.error, /sk-\*\*\*/);
+    assert.doesNotMatch(payload.error, /supersecret/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("ships the required creation, rewriting, hotspot, storage, and export surfaces", async () => {
   const root = new URL("../", import.meta.url);
   const [workspace, generator, providerRoute, providerAdapter, aiSettings, hotspots, references, packager, productTypes, schema, hosting] = await Promise.all([
@@ -96,8 +152,9 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(generator, /generateCompatibleImage/);
   assert.match(generator, /参考原文改写/);
   assert.match(providerRoute, /连接检测助手/);
-  assert.match(providerAdapter, /chat\.completions\.create/);
-  assert.match(providerAdapter, /images\.generate/);
+  assert.match(providerAdapter, /chat\/completions/);
+  assert.match(providerAdapter, /images\/generations/);
+  assert.match(providerAdapter, /redirect: "manual"/);
   assert.match(providerAdapter, /API 地址必须指向公网服务/);
   assert.match(aiSettings, /deepseek-v4-flash/);
   assert.match(aiSettings, /kimi-k3/);
