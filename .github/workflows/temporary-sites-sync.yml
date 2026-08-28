@@ -1,0 +1,33 @@
+name: Temporary Sites source sync
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TARGET_SHA: 3ac3dbe4fa998e21e3488f949b2bec651fe0349f
+      SITES_REMOTE_URL: https://git.chatgpt-team.site/1303141e-f6c1-4f00-b6ec-36c4185637aa/appgprj_6a8fbe951f0081918149fdf47ef82e9c.git
+    steps:
+      - name: Fetch exact GitHub source
+        run: |
+          mkdir source
+          cd source
+          git init
+          git remote add github "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags github "${TARGET_SHA}"
+          git checkout --detach "${TARGET_SHA}"
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+
+      - name: Push exact source to Sites
+        env:
+          SITES_SOURCE_TOKEN: ${{ secrets.SITES_SOURCE_TOKEN }}
+        run: |
+          test -n "${SITES_SOURCE_TOKEN}"
+          cd source
+          git -c http.extraHeader="Authorization: Bearer ${SITES_SOURCE_TOKEN}" push --force "${SITES_REMOTE_URL}" "${TARGET_SHA}:refs/heads/main"
