@@ -18,6 +18,23 @@ function stripCodeFence(value: string) {
   return value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
 }
 
+function parseStructuredOutput(value: string) {
+  const cleaned = stripCodeFence(value);
+  try {
+    return JSON.parse(cleaned) as unknown;
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)) as unknown;
+    throw new Error("模型返回的 JSON 内容不完整");
+  }
+}
+
+function objectField<T>(value: unknown, field: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return (value as Record<string, unknown>)[field] as T | undefined;
+}
+
 function modeInstructions(brief: Brief) {
   if (brief.creationMode === "rewrite") {
     const importedCount = brief.referenceArticles?.length ?? 0;
@@ -72,9 +89,13 @@ export async function POST(request: Request) {
       const output = await generateCompatibleText(
         config,
         `你是资深微信公众号主编。只输出合法 JSON，不要 Markdown。给出三个差异明显、不过度标题党的选题角度。所有关键事实必须来自用户资料；没有资料时只提出需要补充的证据，不要编造数据。${modeInstructions(body.brief)}`,
-        `创作简报：${JSON.stringify(body.brief)}\n\n输出 JSON 数组，每项字段严格为：id,title,hook,thesis,readerGain,evidenceNeeds（字符串数组）。`,
+        `创作简报：${JSON.stringify(body.brief)}\n\n输出 JSON 对象，格式示例：{"topics":[{"id":"angle-1","title":"标题","hook":"切口","thesis":"核心判断","readerGain":"读者收获","evidenceNeeds":["需要的证据"]}]}。topics 必须恰好包含 3 项。`,
+        5000,
+        true,
       );
-      const topics = JSON.parse(stripCodeFence(output)) as TopicAngle[];
+      const parsed = parseStructuredOutput(output);
+      const topics = (Array.isArray(parsed) ? parsed : objectField<TopicAngle[]>(parsed, "topics")) ?? [];
+      if (topics.length !== 3) throw new Error("模型返回的选题数量不正确");
       return json({ mode: "ai", topics, provider: config.label, model: config.model });
     }
 
@@ -82,18 +103,25 @@ export async function POST(request: Request) {
       const output = await generateCompatibleText(
         config,
         `你是微信公众号内容策略编辑。只输出合法 JSON，不要 Markdown。大纲要有清晰叙事推进，每章承担不同任务，不虚构事实。${modeInstructions(body.brief)}`,
-        `创作简报：${JSON.stringify(body.brief)}\n选题角度：${JSON.stringify(body.angle)}\n\n输出 4–6 项 JSON 数组，每项字段严格为：id,heading,purpose,bullets（字符串数组）。`,
+        `创作简报：${JSON.stringify(body.brief)}\n选题角度：${JSON.stringify(body.angle)}\n\n输出 JSON 对象，格式示例：{"outline":[{"id":"section-1","heading":"章节标题","purpose":"章节任务","bullets":["要点"]}]}。outline 必须包含 4–6 项。`,
+        5000,
+        true,
       );
-      const outline = JSON.parse(stripCodeFence(output)) as OutlineItem[];
+      const parsed = parseStructuredOutput(output);
+      const outline = (Array.isArray(parsed) ? parsed : objectField<OutlineItem[]>(parsed, "outline")) ?? [];
+      if (outline.length < 4 || outline.length > 6) throw new Error("模型返回的大纲数量不正确");
       return json({ mode: "ai", outline, provider: config.label, model: config.model });
     }
 
     const output = await generateCompatibleText(
       config,
       `你是专业微信公众号作者。只输出合法 JSON，不要 Markdown。使用自然、克制的中文，避免空洞套话。资料不足时使用观点性表达，不编造数字、人物或案例。在第 2、3 个适合的位置分别设置 IMG-01、IMG-02。${modeInstructions(body.brief)}`,
-      `创作简报：${JSON.stringify(body.brief)}\n选题角度：${JSON.stringify(body.angle)}\n确认大纲：${JSON.stringify(body.outline)}\n\n正文总字数必须符合预计篇幅“${body.brief.length}”。输出 JSON 对象，字段严格为：title,digest,sections。sections 每项字段为 id,heading,paragraphs（字符串数组）,imageSlot（可选字符串）。`,
+      `创作简报：${JSON.stringify(body.brief)}\n选题角度：${JSON.stringify(body.angle)}\n确认大纲：${JSON.stringify(body.outline)}\n\n正文总字数必须符合预计篇幅“${body.brief.length}”。输出 JSON 对象，格式示例：{"draft":{"title":"文章标题","digest":"摘要","sections":[{"id":"section-1","heading":"章节标题","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。`,
+      5000,
+      true,
     );
-    const draft = JSON.parse(stripCodeFence(output));
+    const parsed = parseStructuredOutput(output);
+    const draft = objectField<Record<string, unknown>>(parsed, "draft") ?? parsed;
     return json({ mode: "ai", draft, provider: config.label, model: config.model });
   } catch (error) {
     const fallback = demoResponse(body);
