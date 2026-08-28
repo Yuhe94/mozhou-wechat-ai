@@ -178,9 +178,13 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(generator, /generateCompatibleText/);
   assert.match(generator, /generateCompatibleImage/);
   assert.match(generator, /参考原文改写/);
+  assert.match(generator, /parseStructuredOutput/);
+  assert.match(generator, /模型返回的 JSON 内容不完整/);
   assert.match(providerRoute, /连接检测助手/);
   assert.match(providerAdapter, /chat\/completions/);
   assert.match(providerAdapter, /images\/generations/);
+  assert.match(providerAdapter, /response_format/);
+  assert.match(providerAdapter, /thinking/);
   assert.match(providerAdapter, /redirect: "manual"/);
   assert.match(providerAdapter, /API 地址必须指向公网服务/);
   assert.match(aiSettings, /deepseek-v4-flash/);
