@@ -149,9 +149,10 @@ test("returns upstream HTTP errors without exposing API keys", async () => {
 
 test("ships the required creation, rewriting, hotspot, storage, and export surfaces", async () => {
   const root = new URL("../", import.meta.url);
-  const [workspace, generator, providerRoute, providerAdapter, aiSettings, hotspots, references, packager, productTypes, schema, hosting] = await Promise.all([
+  const [workspace, generator, demoEngine, providerRoute, providerAdapter, aiSettings, hotspots, references, packager, productTypes, schema, hosting] = await Promise.all([
     readFile(new URL("app/workspace.tsx", root), "utf8"),
     readFile(new URL("app/api/generate/route.ts", root), "utf8"),
+    readFile(new URL("app/lib/demo-engine.ts", root), "utf8"),
     readFile(new URL("app/api/provider-test/route.ts", root), "utf8"),
     readFile(new URL("app/lib/ai-provider.server.ts", root), "utf8"),
     readFile(new URL("app/lib/ai-settings.ts", root), "utf8"),
@@ -168,6 +169,8 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(workspace, /generateDraft/);
   assert.match(workspace, /generateImages/);
   assert.match(workspace, /chooseHotspot/);
+  assert.match(workspace, /热点摘要：/);
+  assert.match(workspace, /resetGeneratedContent/);
   assert.match(workspace, /exportPublicationPackage/);
   assert.match(workspace, /referenceArticle/);
   assert.match(workspace, /referenceUrls/);
@@ -179,6 +182,11 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(generator, /generateCompatibleImage/);
   assert.match(generator, /参考原文改写/);
   assert.match(generator, /parseStructuredOutput/);
+  assert.match(generator, /normalizeBriefForGeneration/);
+  assert.match(generator, /topic 字段是文章唯一核心/);
+  assert.match(demoEngine, /看懂「\$\{topic\}」/);
+  assert.match(demoEngine, /发生了什么：先把背景与已知信息说清楚/);
+  assert.doesNotMatch(demoEngine, /AI 应该负责什么|别急着追工具|AI 内容方案/);
   assert.match(generator, /模型返回的 JSON 内容不完整/);
   assert.match(providerRoute, /连接检测助手/);
   assert.match(providerAdapter, /chat\/completions/);
@@ -203,6 +211,7 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(references, /Promise\.allSettled/);
   assert.match(productTypes, /CreationMode/);
   assert.match(productTypes, /interface ReferenceArticle/);
+  assert.doesNotMatch(productTypes, /topic: "AI 如何改变中小企业的内容运营"/);
   assert.match(packager, /referenceMaterialText/);
   assert.match(packager, /IMG-01/);
   assert.match(packager, /zipSync/);
