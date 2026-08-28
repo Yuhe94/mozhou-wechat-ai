@@ -42,6 +42,7 @@ const KNOWN_HOSTS: Record<Exclude<TextProviderId, "custom"> | "image-openai", st
 const TEXT_REQUEST_TIMEOUT_MS = 180_000;
 const IMAGE_REQUEST_TIMEOUT_MS = 240_000;
 const MAX_ERROR_BODY_CHARACTERS = 4_000;
+const MAX_SUCCESS_BODY_CHARACTERS = 4_000_000;
 
 function limitedHeader(headers: Headers, name: string, maximum: number) {
   return (headers.get(name) ?? "").trim().slice(0, maximum);
@@ -206,12 +207,18 @@ async function postProviderJson(
     throw new Error(`${label} API 地址返回跳转，已阻止携带密钥继续请求`);
   }
 
-  const responseText = (await response.text()).slice(0, MAX_ERROR_BODY_CHARACTERS);
+  const responseText = await response.text();
+  if (response.ok && responseText.length > MAX_SUCCESS_BODY_CHARACTERS) {
+    throw new Error(`${label} 返回的数据过大`);
+  }
   let data: unknown;
   try {
     data = responseText ? JSON.parse(responseText) : {};
   } catch {
-    if (!response.ok) throw new Error(`${label} 返回 HTTP ${response.status}`);
+    if (!response.ok) {
+      const detail = sanitizedMessage(responseText.slice(0, MAX_ERROR_BODY_CHARACTERS));
+      throw new Error(`${label} 返回 HTTP ${response.status}${detail ? `：${detail}` : ""}`);
+    }
     throw new Error(`${label} 返回了无法解析的数据`);
   }
 
