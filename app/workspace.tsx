@@ -65,6 +65,10 @@ import {
   type StoredArticle,
   type ThemeId,
   type TopicAngle,
+  type WritingExample,
+  type WritingExampleSource,
+  type WritingProfile,
+  type WritingStyleContext,
   type WorkflowStep,
 } from "./lib/product-types";
 
@@ -72,6 +76,25 @@ type SaveState = "loading" | "saving" | "saved" | "offline";
 type HotspotState = "idle" | "loading" | "loaded" | "error";
 type ReferenceImportError = { url: string; error: string };
 type ProviderTestState = { status: "idle" | "testing" | "success" | "error"; text: string };
+type StyleLibraryData = {
+  examples: WritingExample[];
+  profile: WritingProfile | null;
+  exampleCount: number;
+  profileUpdatedAt: string | null;
+};
+type NewWritingExample = {
+  title: string;
+  content: string;
+  tags: string;
+  source: WritingExampleSource;
+};
+
+const EMPTY_STYLE_LIBRARY: StyleLibraryData = {
+  examples: [],
+  profile: null,
+  exampleCount: 0,
+  profileUpdatedAt: null,
+};
 
 const stepOrder = WORKFLOW_STEPS.map((step) => step.id);
 const AI_SETTINGS_KEY = "mozhou-ai-settings-v1";
@@ -176,6 +199,9 @@ export default function Workspace({ displayName }: { displayName: string }) {
   const [settingsDraft, setSettingsDraft] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [providerTest, setProviderTest] = useState<ProviderTestState>({ status: "idle", text: "" });
+  const [styleLibrary, setStyleLibrary] = useState<StyleLibraryData>(EMPTY_STYLE_LIBRARY);
+  const [styleLibraryOpen, setStyleLibraryOpen] = useState(false);
+  const [styleBusy, setStyleBusy] = useState<string | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -276,6 +302,118 @@ export default function Workspace({ displayName }: { displayName: string }) {
     });
     if (!response.ok) throw new Error((await response.json()).error || "生成失败");
     return (await response.json()) as T;
+  };
+
+  const loadStyleLibrary = useCallback(async () => {
+    const response = await fetch("/api/style-library", { cache: "no-store" });
+    if (!response.ok) throw new Error((await response.json()).error || "无法读取范例库");
+    const data = (await response.json()) as StyleLibraryData;
+    setStyleLibrary(data);
+    return data;
+  }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      void loadStyleLibrary().catch(() => undefined);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loadStyleLibrary]);
+
+  const loadWritingStyleContext = async (topic: string): Promise<WritingStyleContext> => {
+    try {
+      const response = await fetch(`/api/style-library/context?topic=${encodeURIComponent(topic)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("读取风格失败");
+      return (await response.json()) as WritingStyleContext;
+    } catch {
+      return { profile: styleLibrary.profile, examples: [] };
+    }
+  };
+
+  const summarizeStyleProfile = async () => {
+    const contextResponse = await fetch("/api/style-library/context?purpose=profile", { cache: "no-store" });
+    if (!contextResponse.ok) throw new Error("无法读取风格样本");
+    const context = (await contextResponse.json()) as {
+      examples: Array<{ title: string; content: string; tags: string }>;
+    };
+    if (!context.examples.length) throw new Error("请先收录至少一篇范文");
+    const generated = await runGeneration<{
+      profile: WritingProfile;
+      warning?: string;
+    }>({ action: "style-profile", samples: context.examples });
+    const saved = await fetch("/api/style-library", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ profile: generated.profile }),
+    });
+    if (!saved.ok) throw new Error((await saved.json()).error || "风格画像保存失败");
+    const data = (await saved.json()) as Pick<StyleLibraryData, "profile" | "exampleCount" | "profileUpdatedAt">;
+    setStyleLibrary((current) => ({ ...current, ...data }));
+    return generated.warning;
+  };
+
+  const refreshStyleProfile = async () => {
+    setStyleBusy("profile");
+    try {
+      const warning = await summarizeStyleProfile();
+      setNotice({ type: "success", text: warning || "已用当前写作模型重新总结个人写作画像。" });
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "风格画像总结失败" });
+    } finally {
+      setStyleBusy(null);
+    }
+  };
+
+  const addWritingExample = async (example: NewWritingExample) => {
+    setStyleBusy("add");
+    try {
+      const response = await fetch("/api/style-library", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(example),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || "范文收录失败");
+      const library = (await response.json()) as StyleLibraryData;
+      setStyleLibrary(library);
+      let warning: string | undefined;
+      try {
+        warning = await summarizeStyleProfile();
+      } catch {
+        warning = "范文已收录，并已生成本地风格画像；可稍后使用当前模型深度总结。";
+      }
+      setNotice({ type: "success", text: warning || `范文已收录，写作画像已更新为 ${library.exampleCount} 篇样本。` });
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "范文收录失败" });
+    } finally {
+      setStyleBusy(null);
+    }
+  };
+
+  const deleteWritingExample = async (id: string) => {
+    setStyleBusy(id);
+    try {
+      const response = await fetch(`/api/style-library/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error((await response.json()).error || "删除失败");
+      setStyleLibrary((await response.json()) as StyleLibraryData);
+      setNotice({ type: "success", text: "范文已移除，写作画像已重新计算。" });
+    } catch (error) {
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "删除范文失败" });
+    } finally {
+      setStyleBusy(null);
+    }
+  };
+
+  const addCurrentDraftToStyleLibrary = async () => {
+    const content = [
+      snapshot.title,
+      snapshot.digest,
+      ...snapshot.sections.flatMap((section) => [section.heading, ...section.paragraphs]),
+    ].filter(Boolean).join("\n\n");
+    await addWritingExample({
+      title: snapshot.title || snapshot.brief.topic || "当前定稿",
+      content,
+      tags: snapshot.brief.topic,
+      source: "finalized",
+    });
   };
 
   const openAiSettings = () => {
@@ -447,9 +585,11 @@ export default function Workspace({ displayName }: { displayName: string }) {
     }
     setBusy("topics");
     try {
+      const styleContext = await loadWritingStyleContext(snapshot.brief.topic || referenceMaterialText(snapshot.brief).slice(0, 120));
       const data = await runGeneration<{ mode: "ai" | "demo"; topics: TopicAngle[]; warning?: string }>({
         action: "topics",
         brief: snapshot.brief,
+        styleContext,
       });
       updateSnapshot((current) => ({
         ...current,
@@ -475,10 +615,12 @@ export default function Workspace({ displayName }: { displayName: string }) {
     if (!angle) return;
     setBusy("outline");
     try {
+      const styleContext = await loadWritingStyleContext(`${snapshot.brief.topic} ${angle.title}`);
       const data = await runGeneration<{ mode: "ai" | "demo"; outline: OutlineItem[]; warning?: string }>({
         action: "outline",
         brief: snapshot.brief,
         angle,
+        styleContext,
       });
       updateSnapshot((current) => ({ ...current, outline: data.outline, step: "outline", generationMode: data.mode }));
       setNotice({ type: "success", text: data.warning || "大纲已生成，可以逐章调整。" });
@@ -493,11 +635,12 @@ export default function Workspace({ displayName }: { displayName: string }) {
     if (!angle || !snapshot.outline.length) return;
     setBusy("draft");
     try {
+      const styleContext = await loadWritingStyleContext(`${snapshot.brief.topic} ${angle.title}`);
       const data = await runGeneration<{
         mode: "ai" | "demo";
         draft: Pick<ArticleSnapshot, "title" | "digest" | "sections">;
         warning?: string;
-      }>({ action: "draft", brief: snapshot.brief, angle, outline: snapshot.outline });
+      }>({ action: "draft", brief: snapshot.brief, angle, outline: snapshot.outline, styleContext });
       updateSnapshot((current) => ({
         ...current,
         ...data.draft,
@@ -759,6 +902,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
           ))}
         </div>
         <div className="sidebar-footer">
+          <button onClick={() => { setStyleLibraryOpen(true); setMobileNav(false); }}><Clipboard size={16} /> 写作范例库 <span className="sidebar-count">{styleLibrary.exampleCount}</span></button>
           <button><BookOpen size={16} /> 使用指南</button>
           <button onClick={openAiSettings}><Settings2 size={16} /> AI 模型设置</button>
         </div>
@@ -767,7 +911,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
 
       <main className="workspace-main">
         <section className="editor-pane">
-          <StageHeader snapshot={snapshot} aiSettings={aiSettings} />
+          <StageHeader snapshot={snapshot} aiSettings={aiSettings} styleCount={styleLibrary.exampleCount} />
           {snapshot.step === "brief" && (
             <BriefStage
               snapshot={snapshot}
@@ -837,6 +981,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
               onBack={() => setStep("outline")}
               onGenerateImages={generateImages}
               onRegenerate={generateDraft}
+              onAddStyle={() => void addCurrentDraftToStyleLibrary()}
             />
           )}
           {snapshot.step === "visuals" && (
@@ -885,6 +1030,18 @@ export default function Workspace({ displayName }: { displayName: string }) {
           onSave={saveAiSettings}
         />
       )}
+      {styleLibraryOpen && (
+        <StyleLibraryDialog
+          library={styleLibrary}
+          busy={styleBusy}
+          canAddCurrent={snapshot.sections.length > 0 && articleCharacterCount(snapshot) >= 100}
+          onAdd={(example) => addWritingExample(example)}
+          onAddCurrent={() => void addCurrentDraftToStyleLibrary()}
+          onDelete={(id) => void deleteWritingExample(id)}
+          onRefresh={() => void refreshStyleProfile()}
+          onClose={() => setStyleLibraryOpen(false)}
+        />
+      )}
       {notice && (
         <div className={`toast ${notice.type}`} role="status">
           {notice.type === "success" ? <CircleCheck size={18} /> : <CircleAlert size={18} />}
@@ -892,6 +1049,120 @@ export default function Workspace({ displayName }: { displayName: string }) {
           <button onClick={() => setNotice(null)} aria-label="关闭提示"><X size={15} /></button>
         </div>
       )}
+    </div>
+  );
+}
+
+function StyleLibraryDialog({
+  library,
+  busy,
+  canAddCurrent,
+  onAdd,
+  onAddCurrent,
+  onDelete,
+  onRefresh,
+  onClose,
+}: {
+  library: StyleLibraryData;
+  busy: string | null;
+  canAddCurrent: boolean;
+  onAdd: (example: NewWritingExample) => Promise<void>;
+  onAddCurrent: () => void;
+  onDelete: (id: string) => void;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [tags, setTags] = useState("");
+  const [content, setContent] = useState("");
+  const [source, setSource] = useState<WritingExampleSource>("paste");
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const readExampleFile = async (file: File) => {
+    if (!/\.(txt|md)$/i.test(file.name) && !file.type.startsWith("text/")) return;
+    const text = await file.text();
+    setContent(text.slice(0, 30000));
+    setTitle((current) => current || file.name.replace(/\.(txt|md)$/i, ""));
+    setSource("upload");
+  };
+
+  const submit = async () => {
+    if (content.trim().length < 100 || busy) return;
+    await onAdd({ title, tags, content, source });
+  };
+
+  const sourceLabel: Record<WritingExampleSource, string> = {
+    paste: "粘贴收录",
+    upload: "文件上传",
+    finalized: "人工定稿",
+  };
+  const profileRules = library.profile
+    ? [...library.profile.titlePatterns, ...library.profile.openingPatterns, ...library.profile.editorRules].slice(0, 6)
+    : [];
+
+  return (
+    <div className="settings-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="settings-dialog style-library-dialog" role="dialog" aria-modal="true" aria-labelledby="style-library-title">
+        <header className="settings-header">
+          <div><span>VOICE MEMORY</span><h2 id="style-library-title">写作范例库</h2><p>从你认可的文章中提炼标题、开场、结构和节奏，生成时自动调用相关范例。</p></div>
+          <button className="icon-button" onClick={onClose} aria-label="关闭写作范例库"><X size={19} /></button>
+        </header>
+
+        <div className="style-library-summary">
+          <div><span>已收录</span><strong>{library.exampleCount}</strong><small>篇范文</small></div>
+          <div className="style-profile-copy"><span>当前写作画像</span><strong>{library.profile?.summary || "收录第一篇范文后，系统会开始形成你的写作画像。"}</strong><small>{library.profileUpdatedAt ? `更新于 ${formatTime(library.profileUpdatedAt)}` : "尚未生成"}</small></div>
+          <button className="button secondary compact" onClick={onRefresh} disabled={!library.exampleCount || busy === "profile"}>{busy === "profile" ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />} 深度总结画像</button>
+        </div>
+
+        <div className="settings-scroll style-library-scroll">
+          {profileRules.length > 0 && (
+            <section className="style-profile-panel">
+              <div className="settings-section-title"><span>01</span><div><h3>模型下一篇会执行的习惯</h3><p>画像来自全部范例的共同规律，不会照搬某一篇文章。</p></div></div>
+              <div className="style-rule-list">{profileRules.map((rule) => <span key={rule}>{rule}</span>)}</div>
+            </section>
+          )}
+
+          <section className="style-add-panel">
+            <div className="settings-section-title"><span>{profileRules.length ? "02" : "01"}</span><div><h3>收录一篇认可的范文</h3><p>支持粘贴正文，或上传 TXT / Markdown 文件；至少 100 字。</p></div></div>
+            <div className="style-form-grid">
+              <label className="settings-field"><span>文章标题</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：一篇我希望长期学习的文章" /></label>
+              <label className="settings-field"><span>主题标签（可选）</span><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="商业观察、个人成长、社会热点" /></label>
+            </div>
+            <label className="style-content-field"><span>范文正文</span><textarea value={content} onChange={(event) => { setContent(event.target.value); setSource("paste"); }} rows={9} placeholder="粘贴完整正文。系统只学习共同的编辑习惯，不把范文事实当成新文章素材。" /></label>
+            <div className="style-add-actions">
+              <input ref={uploadRef} type="file" className="sr-only" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => event.target.files?.[0] && void readExampleFile(event.target.files[0])} />
+              <button className="button ghost" onClick={() => uploadRef.current?.click()}><Upload size={15} /> 上传 TXT / MD</button>
+              <span>{content.trim().length} 字</span>
+              <button className="button primary" onClick={() => void submit()} disabled={content.trim().length < 100 || busy === "add"}>{busy === "add" ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={15} />} 收录并学习</button>
+            </div>
+            <div className="style-privacy-note"><CircleCheck size={15} /><span>范文持久保存在你的个人范例库。深度总结时，仅将代表性节选发送给你当前选择的写作 API。</span></div>
+          </section>
+
+          <section className="style-examples-panel">
+            <div className="style-list-heading"><div><h3>已收录范文</h3><p>人工修改后的最终稿权重更高，会优先影响下一次生成。</p></div><button className="button ghost compact" onClick={onAddCurrent} disabled={!canAddCurrent || busy === "add"}><Clipboard size={14} /> 收录当前定稿</button></div>
+            {library.examples.length ? (
+              <div className="style-example-list">
+                {library.examples.map((example) => (
+                  <article className="style-example-item" key={example.id}>
+                    <div><span>{sourceLabel[example.source]} · {example.characterCount} 字</span><strong>{example.title}</strong><p>{example.excerpt}</p><small>{example.tags || "未设置主题标签"} · {formatTime(example.updatedAt)}</small></div>
+                    <button className="icon-button" onClick={() => onDelete(example.id)} disabled={busy === example.id} aria-label={`删除范文：${example.title}`}>{busy === example.id ? <LoaderCircle size={15} className="spin" /> : <X size={15} />}</button>
+                  </article>
+                ))}
+              </div>
+            ) : <div className="style-empty"><BookOpen size={22} /><strong>还没有范文</strong><span>先收录 3–5 篇你真正认可的文章，风格画像会明显更稳定。</span></div>}
+          </section>
+        </div>
+
+        <footer className="settings-footer"><span className="style-footer-note">这是可解释的范例检索与风格总结，不会训练或复制某位作者。</span><button className="button primary" onClick={onClose}>完成</button></footer>
+      </section>
     </div>
   );
 }
@@ -981,14 +1252,14 @@ function AiSettingsDialog({
   );
 }
 
-function StageHeader({ snapshot, aiSettings }: { snapshot: ArticleSnapshot; aiSettings: AiSettings }) {
+function StageHeader({ snapshot, aiSettings, styleCount }: { snapshot: ArticleSnapshot; aiSettings: AiSettings; styleCount: number }) {
   const step = WORKFLOW_STEPS.find((item) => item.id === snapshot.step)!;
   return (
     <div className="stage-header">
       <div>
         <span className="stage-kicker">STEP {step.index}</span>
         <h1>{step.label}</h1>
-        <p>{step.description} · {snapshot.generationMode === "ai" ? `${TEXT_PROVIDER_PRESETS[aiSettings.textProvider].label} · ${aiSettings.textModel}` : "可运行演示模式"}</p>
+        <p>{step.description} · {snapshot.generationMode === "ai" ? `${TEXT_PROVIDER_PRESETS[aiSettings.textProvider].label} · ${aiSettings.textModel}` : "可运行演示模式"}{styleCount ? ` · 已启用 ${styleCount} 篇写作范例` : ""}</p>
       </div>
       <div className="version-pill">V{snapshot.version}</div>
     </div>
@@ -1190,12 +1461,12 @@ function OutlineStage({ snapshot, busy, onHeading, onMove, onBack, onGenerate, o
   );
 }
 
-function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGenerateImages, onRegenerate }: {
-  snapshot: ArticleSnapshot; busy: string | null; onTitle: (value: string) => void; onDigest: (value: string) => void; onSection: (index: number, field: "heading" | "paragraphs", value: string) => void; onBack: () => void; onGenerateImages: () => void; onRegenerate: () => void;
+function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGenerateImages, onRegenerate, onAddStyle }: {
+  snapshot: ArticleSnapshot; busy: string | null; onTitle: (value: string) => void; onDigest: (value: string) => void; onSection: (index: number, field: "heading" | "paragraphs", value: string) => void; onBack: () => void; onGenerateImages: () => void; onRegenerate: () => void; onAddStyle: () => void;
 }) {
   return (
     <div className="stage-content">
-      <div className="draft-toolbar"><span><FileText size={15} /> 约 {articleCharacterCount(snapshot)} 字</span><button className="button ghost" onClick={onRegenerate} disabled={busy === "draft"}><RefreshCw size={15} className={busy === "draft" ? "spin" : ""} /> 重生成整篇</button></div>
+      <div className="draft-toolbar"><span><FileText size={15} /> 约 {articleCharacterCount(snapshot)} 字</span><div className="draft-toolbar-actions"><button className="button ghost" onClick={onAddStyle}><Clipboard size={15} /> 将人工定稿收入范例库</button><button className="button ghost" onClick={onRegenerate} disabled={busy === "draft"}><RefreshCw size={15} className={busy === "draft" ? "spin" : ""} /> 重生成整篇</button></div></div>
       <section className="article-editor">
         <input className="article-title-input" value={snapshot.title} onChange={(event) => onTitle(event.target.value)} aria-label="文章标题" />
         <textarea className="digest-input" value={snapshot.digest} onChange={(event) => onDigest(event.target.value)} rows={3} aria-label="文章摘要" />
