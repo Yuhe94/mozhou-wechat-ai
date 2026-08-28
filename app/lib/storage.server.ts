@@ -55,6 +55,37 @@ export async function ensureDatabase() {
       CREATE INDEX IF NOT EXISTS idx_assets_user_created
       ON assets(user_id, created_at DESC)
     `),
+    DB.prepare(`
+      CREATE TABLE IF NOT EXISTS writing_examples (
+        id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'paste',
+        character_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `),
+    DB.prepare(`
+      CREATE INDEX IF NOT EXISTS idx_writing_examples_user_updated
+      ON writing_examples(user_id, updated_at DESC)
+    `),
+    DB.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_writing_examples_user_hash
+      ON writing_examples(user_id, content_hash)
+    `),
+    DB.prepare(`
+      CREATE TABLE IF NOT EXISTS writing_profiles (
+        user_id TEXT PRIMARY KEY NOT NULL,
+        profile TEXT NOT NULL,
+        example_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `),
   ]);
 
   return DB;

@@ -111,6 +111,40 @@ export interface StoredArticle {
   updatedAt: string;
 }
 
+export type WritingExampleSource = "paste" | "upload" | "finalized";
+
+export interface WritingExample {
+  id: string;
+  title: string;
+  tags: string;
+  source: WritingExampleSource;
+  characterCount: number;
+  excerpt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WritingProfile {
+  summary: string;
+  titlePatterns: string[];
+  openingPatterns: string[];
+  structurePatterns: string[];
+  rhythmPatterns: string[];
+  preferredExpressions: string[];
+  avoidExpressions: string[];
+  editorRules: string[];
+}
+
+export interface WritingStyleContext {
+  profile: WritingProfile | null;
+  examples: Array<{
+    title: string;
+    tags: string;
+    source: WritingExampleSource;
+    excerpt: string;
+  }>;
+}
+
 export interface QualityCheck {
   id: string;
   label: string;
