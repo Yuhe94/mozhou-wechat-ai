@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import {
   IMAGE_PROVIDER_PRESETS,
   TEXT_PROVIDER_PRESETS,
@@ -40,6 +39,9 @@ const KNOWN_HOSTS: Record<Exclude<TextProviderId, "custom"> | "image-openai", st
   kimi: ["api.moonshot.ai", "api.moonshot.cn"],
   "image-openai": ["api.openai.com"],
 };
+const TEXT_REQUEST_TIMEOUT_MS = 180_000;
+const IMAGE_REQUEST_TIMEOUT_MS = 240_000;
+const MAX_ERROR_BODY_CHARACTERS = 4_000;
 
 function limitedHeader(headers: Headers, name: string, maximum: number) {
   return (headers.get(name) ?? "").trim().slice(0, maximum);
@@ -144,6 +146,95 @@ export function imageProviderConfig(headers: Headers, environment: ProviderEnvir
   };
 }
 
+function apiEndpoint(baseUrl: string, path: string) {
+  return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function sanitizedMessage(value: string) {
+  return value
+    .replace(/\b(?:sk|key)-[a-z0-9_-]{8,}\b/gi, "sk-***")
+    .replace(/Bearer\s+[^\s,;]+/gi, "Bearer ***")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 280);
+}
+
+function providerMessage(value: unknown) {
+  if (!isRecord(value)) return "";
+  const nested = isRecord(value.error) ? value.error : undefined;
+  const message = nested?.message ?? value.message;
+  return typeof message === "string" ? sanitizedMessage(message) : "";
+}
+
+async function postProviderJson(
+  label: string,
+  url: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      redirect: "manual",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${label} 请求超时，请稍后重试`);
+    }
+    const detail = error instanceof Error ? sanitizedMessage(error.message) : "未知网络错误";
+    throw new Error(`${label} 网络请求失败${detail ? `：${detail}` : ""}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`${label} API 地址返回跳转，已阻止携带密钥继续请求`);
+  }
+
+  const responseText = (await response.text()).slice(0, MAX_ERROR_BODY_CHARACTERS);
+  let data: unknown;
+  try {
+    data = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    if (!response.ok) throw new Error(`${label} 返回 HTTP ${response.status}`);
+    throw new Error(`${label} 返回了无法解析的数据`);
+  }
+
+  if (!response.ok) {
+    const detail = providerMessage(data);
+    throw new Error(`${label} 返回 HTTP ${response.status}${detail ? `：${detail}` : ""}`);
+  }
+  return data;
+}
+
+function completionText(data: unknown) {
+  if (!isRecord(data) || !Array.isArray(data.choices)) return "";
+  const first = data.choices[0];
+  if (!isRecord(first) || !isRecord(first.message)) return "";
+  const content = first.message.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
 export async function generateCompatibleText(
   config: TextProviderConfig,
   instructions: string,
@@ -151,17 +242,16 @@ export async function generateCompatibleText(
   maxTokens = 5000,
 ) {
   if (!config.apiKey) throw new Error(`尚未配置 ${config.label} API Key`);
-  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, fetch: noRedirectFetch });
-  const completion = await client.chat.completions.create({
+  const completion = await postProviderJson(config.label, apiEndpoint(config.baseUrl, "chat/completions"), config.apiKey, {
     model: config.model,
     messages: [
       { role: config.provider === "openai" ? "developer" : "system", content: instructions },
       { role: "user", content: input },
     ],
     ...(config.provider === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
-  });
-  const content = completion.choices[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) throw new Error("模型未返回文字内容");
+  }, TEXT_REQUEST_TIMEOUT_MS);
+  const content = completionText(completion);
+  if (!content.trim()) throw new Error("模型未返回文字内容");
   return content;
 }
 
@@ -176,16 +266,20 @@ function bytesToBase64(bytes: Uint8Array) {
 export async function generateCompatibleImage(config: ImageProviderConfig, prompt: string) {
   if (config.provider === "local") return null;
   if (!config.apiKey) throw new Error(`尚未配置 ${config.label} API Key`);
-  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, fetch: noRedirectFetch });
-  const result = await client.images.generate({
+  const result = await postProviderJson(config.label, apiEndpoint(config.baseUrl, "images/generations"), config.apiKey, {
     model: config.model,
     prompt,
     size: "1536x1024",
-  });
-  const image = result.data?.[0];
-  if (image?.b64_json) return `data:image/png;base64,${image.b64_json}`;
-  if (image?.url) {
-    const safeImageUrl = validateBaseUrl(image.url, undefined, true);
+  }, IMAGE_REQUEST_TIMEOUT_MS);
+  const image = isRecord(result) && Array.isArray(result.data) && isRecord(result.data[0]) ? result.data[0] : undefined;
+  const base64 = typeof image?.b64_json === "string" ? image.b64_json : "";
+  const imageUrl = typeof image?.url === "string" ? image.url : "";
+  if (base64) {
+    if (base64.length > 20_000_000) throw new Error("图片服务返回的文件过大");
+    return `data:image/png;base64,${base64}`;
+  }
+  if (imageUrl) {
+    const safeImageUrl = validateBaseUrl(imageUrl, undefined, true);
     const response = await fetch(safeImageUrl, { redirect: "error" });
     if (!response.ok) throw new Error("图片服务返回的文件无法下载");
     const contentType = response.headers.get("content-type") || "image/png";
@@ -196,5 +290,3 @@ export async function generateCompatibleImage(config: ImageProviderConfig, promp
   }
   throw new Error("图片服务未返回图像数据");
 }
-
-const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, redirect: "error" });
