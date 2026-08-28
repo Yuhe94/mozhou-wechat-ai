@@ -94,6 +94,33 @@ test("uses a native guarded POST for OpenAI-compatible providers", async () => {
   }
 });
 
+test("preserves complete successful provider responses larger than the error preview limit", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      id: `completion-${"x".repeat(6_000)}`,
+      choices: [{ message: { content: "正常" } }],
+    });
+  try {
+    const response = await request("/api/provider-test", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-mozhou-text-provider": "custom",
+        "x-mozhou-text-base-url": "https://provider.example.com/v1",
+        "x-mozhou-text-model": "compatible-model",
+        "x-mozhou-text-api-key": "test-key",
+      },
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("returns upstream HTTP errors without exposing API keys", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
