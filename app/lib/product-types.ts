@@ -159,6 +159,8 @@ export function createBlankSnapshot(): ArticleSnapshot {
     theme: "paper",
     aiDisclosure: true,
     generationMode: "demo",
-    updatedAt: new Date().toISOString(),
+    // Keep the server and browser's first render identical; a live timestamp is
+    // assigned when a new article is persisted or edited.
+    updatedAt: "2000-01-01T00:00:00.000Z",
   };
 }
