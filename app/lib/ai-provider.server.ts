@@ -247,6 +247,7 @@ export async function generateCompatibleText(
   instructions: string,
   input: string,
   maxTokens = 5000,
+  jsonMode = false,
 ) {
   if (!config.apiKey) throw new Error(`尚未配置 ${config.label} API Key`);
   const completion = await postProviderJson(config.label, apiEndpoint(config.baseUrl, "chat/completions"), config.apiKey, {
@@ -256,6 +257,8 @@ export async function generateCompatibleText(
       { role: "user", content: input },
     ],
     ...(config.provider === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+    ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+    ...(jsonMode && config.provider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
   }, TEXT_REQUEST_TIMEOUT_MS);
   const content = completionText(completion);
   if (!content.trim()) throw new Error("模型未返回文字内容");
