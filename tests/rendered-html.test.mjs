@@ -225,3 +225,35 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   await access(new URL("drizzle/0000_minor_firelord.sql", root));
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", root)));
 });
+
+test("ships a persistent writing-example library and injects its style into generation", async () => {
+  const root = new URL("../", import.meta.url);
+  const [workspace, generator, libraryRoute, contextRoute, styleProfile, schema, migration] = await Promise.all([
+    readFile(new URL("app/workspace.tsx", root), "utf8"),
+    readFile(new URL("app/api/generate/route.ts", root), "utf8"),
+    readFile(new URL("app/api/style-library/route.ts", root), "utf8"),
+    readFile(new URL("app/api/style-library/context/route.ts", root), "utf8"),
+    readFile(new URL("app/lib/style-profile.ts", root), "utf8"),
+    readFile(new URL("db/schema.ts", root), "utf8"),
+    readFile(new URL("drizzle/0001_curvy_iron_patriot.sql", root), "utf8"),
+  ]);
+
+  assert.match(workspace, /写作范例库/);
+  assert.match(workspace, /收录并学习/);
+  assert.match(workspace, /将人工定稿收入范例库/);
+  assert.match(workspace, /purpose=profile/);
+  assert.match(workspace, /styleContext/);
+  assert.match(generator, /style-profile/);
+  assert.match(generator, /资深公众号主编/);
+  assert.match(generator, /在当今快速发展的时代/);
+  assert.match(generator, /相关范例片段/);
+  assert.match(libraryRoute, /rebuildDeterministicProfile/);
+  assert.match(contextRoute, /buildWritingStyleContext/);
+  assert.match(styleProfile, /titlePatterns/);
+  assert.match(styleProfile, /avoidExpressions/);
+  assert.match(schema, /writingExamples/);
+  assert.match(schema, /writingProfiles/);
+  assert.match(migration, /CREATE TABLE `writing_examples`/);
+  assert.match(migration, /CREATE TABLE `writing_profiles`/);
+  assert.match(migration, /PRAGMA optimize/);
+});
