@@ -142,6 +142,25 @@ function selectedAngle(snapshot: ArticleSnapshot) {
   return snapshot.topics.find((topic) => topic.id === snapshot.selectedTopicId) ?? snapshot.topics[0];
 }
 
+function resetGeneratedContent(
+  snapshot: ArticleSnapshot,
+  brief: ArticleSnapshot["brief"],
+): ArticleSnapshot {
+  return {
+    ...snapshot,
+    brief,
+    topics: [],
+    selectedTopicId: null,
+    outline: [],
+    title: "",
+    digest: "",
+    sections: [],
+    images: [],
+    step: "brief",
+    generationMode: "demo",
+  };
+}
+
 export default function Workspace({ displayName }: { displayName: string }) {
   const [snapshot, setSnapshot] = useState<ArticleSnapshot>(() => createBlankSnapshot());
   const [articleId, setArticleId] = useState<string | null>(null);
@@ -316,24 +335,30 @@ export default function Workspace({ displayName }: { displayName: string }) {
   }, []);
 
   const setCreationMode = (mode: CreationMode) => {
-    updateSnapshot((current) => ({
-      ...current,
-      brief: { ...current.brief, creationMode: mode },
-    }));
+    updateSnapshot((current) =>
+      resetGeneratedContent(current, { ...current.brief, creationMode: mode }),
+    );
     if (mode === "hotspot" && hotspotState === "idle") void loadHotspots();
   };
 
   const chooseHotspot = (hotspot: Hotspot) => {
     updateSnapshot((current) => {
       const sourceLine = `热点来源：${hotspot.source}｜${hotspot.url}`;
-      const existing = current.brief.sourcesText.startsWith("可粘贴") ? "" : current.brief.sourcesText.trim();
-      const sourcesText = existing.includes(hotspot.url)
-        ? existing
-        : [existing, sourceLine].filter(Boolean).join("\n");
-      return {
-        ...current,
-        brief: { ...current.brief, creationMode: "hotspot", topic: hotspot.title, sourcesText },
+      const summaryLine = hotspot.summary.trim() ? `热点摘要：${hotspot.summary.trim()}` : "";
+      const retainedSources = current.brief.sourcesText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("可粘贴") && !line.startsWith("热点来源：") && !line.startsWith("热点摘要："));
+      const brief = {
+        ...current.brief,
+        creationMode: "hotspot" as const,
+        topic: hotspot.title,
+        audience: "关注该热点及其影响的普通读者",
+        goal: `帮助读者理解「${hotspot.title}」的已知信息、背景和关注价值`,
+        callToAction: "引导读者核对可靠来源，并基于已知信息形成理性判断",
+        sourcesText: [summaryLine, sourceLine, ...retainedSources].filter(Boolean).join("\n"),
       };
+      return resetGeneratedContent(current, brief);
     });
     setNotice({ type: "success", text: `已选择热点「${hotspot.title}」，可继续补充你的观点。` });
   };
@@ -368,9 +393,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
         const referenceArticles = [...new Map(references.map((article) => [article.url, article])).values()].slice(0, 5);
         const existingSources = current.brief.sourcesText.startsWith("可粘贴") ? [] : current.brief.sourcesText.split("\n").filter(Boolean);
         const importedSources = data.articles!.map((article) => `链接参考：${article.title}｜${article.account}｜${article.url}`);
-        return {
-          ...current,
-          brief: {
+        return resetGeneratedContent(current, {
             ...current.brief,
             creationMode: "rewrite",
             referenceArticles,
@@ -379,8 +402,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
               ...(data.errors ?? []).map((item) => item.url),
             ].join("\n"),
             sourcesText: [...new Set([...existingSources, ...importedSources])].join("\n"),
-          },
-        };
+          });
       });
       const failed = data.errors?.length ?? 0;
       setNotice({
@@ -397,9 +419,8 @@ export default function Workspace({ displayName }: { displayName: string }) {
   };
 
   const removeReferenceArticle = (url: string) => {
-    updateSnapshot((current) => ({
-      ...current,
-      brief: {
+    updateSnapshot((current) =>
+      resetGeneratedContent(current, {
         ...current.brief,
         referenceArticles: (current.brief.referenceArticles ?? []).filter((article) => article.url !== url),
         referenceUrls: (current.brief.referenceUrls ?? "")
@@ -410,8 +431,8 @@ export default function Workspace({ displayName }: { displayName: string }) {
           .split("\n")
           .filter((line) => !line.includes(url))
           .join("\n"),
-      },
-    }));
+      }),
+    );
   };
 
   const generateTopics = async () => {
@@ -608,9 +629,8 @@ export default function Workspace({ displayName }: { displayName: string }) {
       form.append("file", file);
       const response = await fetch("/api/assets", { method: "POST", body: form });
       if (!response.ok) throw new Error((await response.json()).error || "上传失败");
-      updateSnapshot((current) => ({
-        ...current,
-        brief: {
+      updateSnapshot((current) =>
+        resetGeneratedContent(current, {
           ...current.brief,
           sourcesText: [
             current.brief.sourcesText.startsWith("可粘贴") ? "" : current.brief.sourcesText,
@@ -619,8 +639,8 @@ export default function Workspace({ displayName }: { displayName: string }) {
           ]
             .filter(Boolean)
             .join("\n"),
-        },
-      }));
+        }),
+      );
       setNotice({ type: "success", text: `${file.name} 已加入参考资料。` });
     } catch (error) {
       setNotice({ type: "error", text: error instanceof Error ? error.message : "资料上传失败" });
@@ -753,7 +773,9 @@ export default function Workspace({ displayName }: { displayName: string }) {
               snapshot={snapshot}
               busy={busy}
               onChange={(field, value) =>
-                updateSnapshot((current) => ({ ...current, brief: { ...current.brief, [field]: value } }))
+                updateSnapshot((current) =>
+                  resetGeneratedContent(current, { ...current.brief, [field]: value }),
+                )
               }
               onGenerate={generateTopics}
               onUpload={() => fileInputRef.current?.click()}
