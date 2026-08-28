@@ -26,7 +26,7 @@ jobs:
 
       - name: Push exact source to Sites
         env:
-          SITES_SOURCE_TOKEN: ${{ secrets.SITES_SOURCE_TOKEN_V5 }}
+          SITES_SOURCE_TOKEN: ${{ secrets.SITES_SOURCE_TOKEN_V6 }}
         run: |
           test -n "${SITES_SOURCE_TOKEN}"
           cd source
