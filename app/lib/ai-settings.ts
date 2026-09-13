@@ -1,5 +1,7 @@
 export type TextProviderId = "openai" | "deepseek" | "kimi" | "custom";
 export type ImageProviderId = "openai" | "custom" | "local";
+export type NewsSearchProviderId = "auto" | "brave" | "public";
+export type NewsRegionId = "auto" | "cn" | "hk" | "tw" | "all";
 
 export interface AiSettings {
   textProvider: TextProviderId;
@@ -10,6 +12,9 @@ export interface AiSettings {
   imageModel: string;
   imageBaseUrl: string;
   imageApiKey: string;
+  newsSearchProvider: NewsSearchProviderId;
+  newsRegion: NewsRegionId;
+  newsSearchApiKey: string;
   rememberKeys: boolean;
 }
 
@@ -73,6 +78,9 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   imageModel: IMAGE_PROVIDER_PRESETS.local.model,
   imageBaseUrl: "",
   imageApiKey: "",
+  newsSearchProvider: "auto",
+  newsRegion: "auto",
+  newsSearchApiKey: "",
   rememberKeys: false,
 };
 
@@ -88,5 +96,8 @@ export function generationHeaders(settings: AiSettings) {
     "x-mozhou-image-model": settings.imageModel.trim(),
     "x-mozhou-image-base-url": settings.imageBaseUrl.trim(),
     "x-mozhou-image-api-key": settings.imageApiKey.trim() || sharedOpenAiKey.trim(),
+    "x-mozhou-news-search-provider": settings.newsSearchProvider,
+    "x-mozhou-news-region": settings.newsRegion,
+    "x-mozhou-news-search-api-key": settings.newsSearchApiKey.trim(),
   };
 }

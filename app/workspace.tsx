@@ -43,6 +43,8 @@ import {
   TEXT_PROVIDER_PRESETS,
   type AiSettings,
   type ImageProviderId,
+  type NewsRegionId,
+  type NewsSearchProviderId,
   type TextProviderId,
 } from "./lib/ai-settings";
 import {
@@ -62,6 +64,8 @@ import {
   type Hotspot,
   type OutlineItem,
   type ReferenceArticle,
+  type ResearchReport,
+  type ResearchSource,
   type StoredArticle,
   type ThemeId,
   type TopicAngle,
@@ -109,16 +113,25 @@ function loadAiSettings() {
     const base = { ...DEFAULT_AI_SETTINGS, ...stored, textProvider, imageProvider };
     const secretStore = base.rememberKeys ? window.localStorage : window.sessionStorage;
     const secrets = JSON.parse(secretStore.getItem(AI_SECRETS_KEY) || "{}") as Partial<AiSettings>;
-    return { ...base, textApiKey: secrets.textApiKey || "", imageApiKey: secrets.imageApiKey || "" };
+    return {
+      ...base,
+      textApiKey: secrets.textApiKey || "",
+      imageApiKey: secrets.imageApiKey || "",
+      newsSearchApiKey: secrets.newsSearchApiKey || "",
+    };
   } catch {
     return DEFAULT_AI_SETTINGS;
   }
 }
 
 function storeAiSettings(settings: AiSettings) {
-  const publicSettings = { ...settings, textApiKey: "", imageApiKey: "" };
+  const publicSettings = { ...settings, textApiKey: "", imageApiKey: "", newsSearchApiKey: "" };
   window.localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(publicSettings));
-  const secrets = JSON.stringify({ textApiKey: settings.textApiKey, imageApiKey: settings.imageApiKey });
+  const secrets = JSON.stringify({
+    textApiKey: settings.textApiKey,
+    imageApiKey: settings.imageApiKey,
+    newsSearchApiKey: settings.newsSearchApiKey,
+  });
   if (settings.rememberKeys) {
     window.localStorage.setItem(AI_SECRETS_KEY, secrets);
     window.sessionStorage.removeItem(AI_SECRETS_KEY);
@@ -175,6 +188,8 @@ function resetGeneratedContent(
     topics: [],
     selectedTopicId: null,
     outline: [],
+    researchSources: [],
+    researchReport: undefined,
     title: "",
     digest: "",
     sections: [],
@@ -435,10 +450,15 @@ export default function Workspace({ displayName }: { displayName: string }) {
       setProviderTest({ status: "error", text: "请填写图片 API 地址和模型名称" });
       return;
     }
+    if (settingsDraft.newsSearchProvider === "brave" && !settingsDraft.newsSearchApiKey.trim()) {
+      setProviderTest({ status: "error", text: "选择 Brave News 时需要填写 Brave Search API Key" });
+      return;
+    }
     storeAiSettings(settingsDraft);
     setAiSettings(settingsDraft);
     setSettingsOpen(false);
-    setNotice({ type: "success", text: `已切换写作模型：${TEXT_PROVIDER_PRESETS[settingsDraft.textProvider].label} · ${settingsDraft.textModel}` });
+    const newsMode = settingsDraft.newsSearchProvider === "brave" ? "Brave News + 区域官方源" : settingsDraft.newsSearchProvider === "public" ? "区域官方源 + GDELT" : "自动分层检索";
+    setNotice({ type: "success", text: `已保存：${TEXT_PROVIDER_PRESETS[settingsDraft.textProvider].label} · ${newsMode}` });
   };
 
   const testProviderConnection = async () => {
@@ -580,7 +600,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
       return;
     }
     if (mode !== "rewrite" && !snapshot.brief.topic.trim()) {
-      setNotice({ type: "error", text: "先写下一个明确主题，再生成选题角度。" });
+      setNotice({ type: "error", text: "先写下一个明确主题，再生成研究角度。" });
       return;
     }
     setBusy("topics");
@@ -596,6 +616,8 @@ export default function Workspace({ displayName }: { displayName: string }) {
         topics: data.topics,
         selectedTopicId: data.topics[0]?.id ?? null,
         outline: [],
+        researchSources: [],
+        researchReport: undefined,
         title: "",
         digest: "",
         sections: [],
@@ -603,9 +625,9 @@ export default function Workspace({ displayName }: { displayName: string }) {
         step: "topics",
         generationMode: data.mode,
       }));
-      setNotice({ type: "success", text: data.warning || "已生成 3 个差异化选题角度。" });
+      setNotice({ type: "success", text: data.warning || "已生成 3 个内部研究角度；它们不是文章标题。" });
     } catch (error) {
-      setNotice({ type: "error", text: error instanceof Error ? error.message : "选题生成失败" });
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "研究角度生成失败" });
     } finally {
       setBusy(null);
     }
@@ -622,10 +644,17 @@ export default function Workspace({ displayName }: { displayName: string }) {
         angle,
         styleContext,
       });
-      updateSnapshot((current) => ({ ...current, outline: data.outline, step: "outline", generationMode: data.mode }));
-      setNotice({ type: "success", text: data.warning || "大纲已生成，可以逐章调整。" });
+      updateSnapshot((current) => ({
+        ...current,
+        outline: data.outline,
+        researchSources: [],
+        researchReport: undefined,
+        step: "outline",
+        generationMode: data.mode,
+      }));
+      setNotice({ type: "success", text: data.warning || "研究提纲已生成，可以修改问题、证据和联网检索词。" });
     } catch (error) {
-      setNotice({ type: "error", text: error instanceof Error ? error.message : "大纲生成失败" });
+      setNotice({ type: "error", text: error instanceof Error ? error.message : "研究提纲生成失败" });
     } finally {
       setBusy(null);
     }
@@ -638,17 +667,26 @@ export default function Workspace({ displayName }: { displayName: string }) {
       const styleContext = await loadWritingStyleContext(`${snapshot.brief.topic} ${angle.title}`);
       const data = await runGeneration<{
         mode: "ai" | "demo";
+        editorPass?: "final" | "working-draft";
+        researchMode?: "online" | "brief-only";
         draft: Pick<ArticleSnapshot, "title" | "digest" | "sections">;
+        researchSources?: ResearchSource[];
+        researchReport?: ResearchReport;
         warning?: string;
       }>({ action: "draft", brief: snapshot.brief, angle, outline: snapshot.outline, styleContext });
       updateSnapshot((current) => ({
         ...current,
         ...data.draft,
+        researchSources: data.researchSources ?? [],
+        researchReport: data.researchReport,
         images: [],
         step: "draft",
         generationMode: data.mode,
       }));
-      setNotice({ type: "success", text: data.warning || "正文初稿已完成，请进行人工编辑。" });
+      setNotice({
+        type: data.editorPass === "working-draft" || data.researchMode === "brief-only" ? "error" : "success",
+        text: data.warning || "双轮编辑已完成：作者工作稿已重写为面向读者的成稿。",
+      });
     } catch (error) {
       setNotice({ type: "error", text: error instanceof Error ? error.message : "正文生成失败" });
     } finally {
@@ -954,6 +992,28 @@ export default function Workspace({ displayName }: { displayName: string }) {
                   outline: current.outline.map((item, itemIndex) => itemIndex === index ? { ...item, heading: value } : item),
                 }))
               }
+              onPurpose={(index, value) =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  outline: current.outline.map((item, itemIndex) => itemIndex === index ? { ...item, purpose: value } : item),
+                }))
+              }
+              onEvidence={(index, value) =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  outline: current.outline.map((item, itemIndex) => itemIndex === index
+                    ? { ...item, bullets: value.split(/\n+/).map((line) => line.trim()).filter(Boolean) }
+                    : item),
+                }))
+              }
+              onQueries={(index, value) =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  outline: current.outline.map((item, itemIndex) => itemIndex === index
+                    ? { ...item, searchQueries: value.split(/\n+/).map((line) => line.trim()).filter(Boolean) }
+                    : item),
+                }))
+              }
               onMove={moveOutline}
               onBack={() => setStep("topics")}
               onGenerate={generateDraft}
@@ -1185,6 +1245,18 @@ function AiSettingsDialog({
   const [showKeys, setShowKeys] = useState(false);
   const textPreset = TEXT_PROVIDER_PRESETS[settings.textProvider];
   const imagePreset = IMAGE_PROVIDER_PRESETS[settings.imageProvider];
+  const newsProviderLabel = settings.newsSearchProvider === "brave"
+    ? "Brave News + 官方源"
+    : settings.newsSearchProvider === "public"
+      ? "公开源分层"
+      : "自动分层";
+  const newsRegionLabel: Record<NewsRegionId, string> = {
+    auto: "自动识别地区",
+    cn: "中国大陆",
+    hk: "中国香港",
+    tw: "中国台湾",
+    all: "大陆 / 香港 / 台湾",
+  };
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1214,12 +1286,14 @@ function AiSettingsDialog({
         <div className="modality-route" aria-label="多模态路由概览">
           <div><span>文字创作</span><strong>{textPreset.label}</strong><small>{settings.textModel}</small></div>
           <ArrowRight size={17} />
+          <div><span>新闻研究</span><strong>{newsProviderLabel}</strong><small>{newsRegionLabel[settings.newsRegion]}</small></div>
+          <ArrowRight size={17} />
           <div><span>图片生成</span><strong>{imagePreset.label}</strong><small>{settings.imageModel}</small></div>
         </div>
 
         <div className="settings-scroll">
           <section className="settings-section">
-            <div className="settings-section-title"><span>01</span><div><h3>写作模型</h3><p>用于选题、大纲、正文和参考改写。</p></div></div>
+            <div className="settings-section-title"><span>01</span><div><h3>写作模型</h3><p>用于研究角度、研究提纲、资料深化、正文和参考改写。</p></div></div>
             <div className="settings-grid">
               <label className="settings-field"><span>服务商</span><select value={settings.textProvider} onChange={(event) => switchTextProvider(event.target.value as TextProviderId)}><option value="openai">OpenAI / ChatGPT API</option><option value="deepseek">DeepSeek</option><option value="kimi">Kimi</option><option value="custom">自定义兼容接口</option></select></label>
               <label className="settings-field"><span>模型名称</span><input list="text-model-options" value={settings.textModel} onChange={(event) => onChange({ textModel: event.target.value })} placeholder="输入 API 模型名称" /><datalist id="text-model-options">{textPreset.models.map((model) => <option value={model} key={model} />)}</datalist></label>
@@ -1234,7 +1308,17 @@ function AiSettingsDialog({
           </section>
 
           <section className="settings-section">
-            <div className="settings-section-title"><span>02</span><div><h3>配图模型</h3><p>与写作服务独立；DeepSeek、Kimi 写文时仍可让 OpenAI 出图。</p></div></div>
+            <div className="settings-section-title"><span>02</span><div><h3>联网新闻研究</h3><p>优先读取大陆、香港、台湾的区域来源，再用全球新闻搜索补充。</p></div></div>
+            <div className="settings-grid">
+              <label className="settings-field"><span>检索方式</span><select value={settings.newsSearchProvider} onChange={(event) => onChange({ newsSearchProvider: event.target.value as NewsSearchProviderId })}><option value="auto">自动分层（推荐）</option><option value="brave">Brave News + 区域官方源</option><option value="public">区域官方源 + GDELT</option></select></label>
+              <label className="settings-field"><span>重点地区</span><select value={settings.newsRegion} onChange={(event) => onChange({ newsRegion: event.target.value as NewsRegionId })}><option value="auto">根据选题自动识别</option><option value="cn">中国大陆</option><option value="hk">中国香港</option><option value="tw">中国台湾</option><option value="all">大陆 / 香港 / 台湾</option></select></label>
+              {settings.newsSearchProvider !== "public" ? <label className="settings-field full"><span>Brave Search API Key{settings.newsSearchProvider === "auto" ? "（选填）" : ""}</span><div className="secret-input"><input type={showKeys ? "text" : "password"} value={settings.newsSearchApiKey} onChange={(event) => onChange({ newsSearchApiKey: event.target.value })} autoComplete="off" placeholder={settings.newsSearchProvider === "auto" ? "留空时使用区域官方源和 GDELT 降级检索" : "BSA-..."} /><button type="button" onClick={() => setShowKeys((current) => !current)}>{showKeys ? "隐藏" : "显示"}</button></div></label> : null}
+            </div>
+            <p className="settings-hint">自动模式会优先使用区域官方来源；有 Brave Key 时补充商业新闻搜索，没有 Key 或请求失败时才降级到 GDELT。GDELT 只作为全球线索补充，不作为中国新闻唯一来源。</p>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-title"><span>03</span><div><h3>配图模型</h3><p>与写作服务独立；DeepSeek、Kimi 写文时仍可让 OpenAI 出图。</p></div></div>
             <div className="settings-grid">
               <label className="settings-field"><span>配图方式</span><select value={settings.imageProvider} onChange={(event) => switchImageProvider(event.target.value as ImageProviderId)}><option value="local">本地排版图（免费）</option><option value="openai">OpenAI 图片 API</option><option value="custom">自定义图片接口</option></select></label>
               <label className="settings-field"><span>图片模型</span><input value={settings.imageModel} onChange={(event) => onChange({ imageModel: event.target.value })} disabled={settings.imageProvider === "local"} /></label>
@@ -1243,7 +1327,7 @@ function AiSettingsDialog({
           </section>
 
           <label className="remember-key" htmlFor="remember-api-keys"><input id="remember-api-keys" type="checkbox" aria-label="在此设备记住 API Key" checked={settings.rememberKeys} onChange={(event) => onChange({ rememberKeys: event.target.checked })} /><span><strong>在此设备记住 API Key</strong><small>开启后密钥会保存在本机浏览器；公用设备请勿开启。</small></span></label>
-          <div className="key-safety-note"><Settings2 size={16} /><p>密钥只随生成请求发送给所选 API，不写入文章数据库、参考资料或导出包。关闭“记住”时，关闭浏览器会话后密钥失效。</p></div>
+          <div className="key-safety-note"><Settings2 size={16} /><p>写作、图片和新闻搜索密钥只随对应请求发送，不写入文章数据库、参考资料或导出包。关闭“记住”时，关闭浏览器会话后密钥失效。</p></div>
         </div>
 
         <footer className="settings-footer"><button className="button ghost" onClick={onClose}>取消</button><button className="button primary" onClick={onSave}>保存并使用</button></footer>
@@ -1397,9 +1481,9 @@ function BriefStage({
         <label className="field-group full-width"><span>希望读者采取的行动</span><input value={snapshot.brief.callToAction} onChange={(event) => onChange("callToAction", event.target.value)} /></label>
       </section>
       <div className="stage-footer">
-        <div className="ai-note"><Sparkles size={16} /><span>{mode === "rewrite" ? "系统会保留事实并重做结构与表达，不会直接照搬原文。" : mode === "hotspot" ? "热点只作为选题线索；系统会区分已知事实与观点。" : "系统会先给出三个角度，不会直接生成整篇文章。"}</span></div>
+        <div className="ai-note"><Sparkles size={16} /><span>{mode === "rewrite" ? "系统会保留事实并重做结构与表达，不会直接照搬原文。" : mode === "hotspot" ? "热点只作为选题线索；系统会区分已知事实与观点。" : "系统先给出三个内部研究角度，不会把它们当作文章标题。"}</span></div>
         <button className="button primary large" onClick={onGenerate} disabled={busy === "topics"}>
-          {busy === "topics" ? <LoaderCircle size={18} className="spin" /> : <WandSparkles size={18} />} 生成选题角度 <ArrowRight size={17} />
+          {busy === "topics" ? <LoaderCircle size={18} className="spin" /> : <WandSparkles size={18} />} 生成研究角度 <ArrowRight size={17} />
         </button>
       </div>
     </div>
@@ -1411,7 +1495,7 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
 }) {
   return (
     <div className="stage-content">
-      <div className="topic-intro"><div><h2>同一个主题，先选叙事角度</h2><p>每个角度对应不同的开场、核心判断和证据需求。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "topics"}><RefreshCw size={15} className={busy === "topics" ? "spin" : ""} /> 换一组选题</button></div>
+      <div className="topic-intro"><div><h2>先选择研究角度，不是文章标题</h2><p>角度只决定要追问什么、查什么资料和形成什么判断；真正标题在研究完成后另写。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "topics"}><RefreshCw size={15} className={busy === "topics" ? "spin" : ""} /> 换一组角度</button></div>
       <div className="topic-cards">
         {snapshot.topics.map((topic, index) => {
           const selected = topic.id === snapshot.selectedTopicId;
@@ -1419,7 +1503,8 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
             <button className={`topic-card ${selected ? "selected" : ""}`} key={topic.id} onClick={() => onSelect(topic.id)}>
               <span className="topic-index">0{index + 1}</span>
               <span className={`radio-mark ${selected ? "checked" : ""}`}>{selected && <Check size={13} />}</span>
-              <span className="topic-strategy">{index === 0 ? "方法切口" : index === 1 ? "反思切口" : "案例切口"}</span>
+              <span className="topic-strategy">{index === 0 ? "事实方向" : index === 1 ? "矛盾方向" : "时间方向"}</span>
+              <small className="internal-label">内部研究角度</small>
               <h3>{topic.title}</h3>
               <p className="topic-hook">{topic.hook}</p>
               <span className="topic-divider" />
@@ -1431,32 +1516,35 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
       </div>
       <div className="stage-footer between">
         <button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回简报</button>
-        <button className="button primary large" onClick={onGenerate} disabled={!snapshot.selectedTopicId || busy === "outline"}>{busy === "outline" ? <LoaderCircle size={18} className="spin" /> : <LayoutTemplate size={18} />} 用这个角度生成大纲 <ArrowRight size={17} /></button>
+        <button className="button primary large" onClick={onGenerate} disabled={!snapshot.selectedTopicId || busy === "outline"}>{busy === "outline" ? <LoaderCircle size={18} className="spin" /> : <LayoutTemplate size={18} />} 按这个方向生成研究提纲 <ArrowRight size={17} /></button>
       </div>
     </div>
   );
 }
 
-function OutlineStage({ snapshot, busy, onHeading, onMove, onBack, onGenerate, onRegenerate }: {
-  snapshot: ArticleSnapshot; busy: string | null; onHeading: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
+function OutlineStage({ snapshot, busy, onHeading, onPurpose, onEvidence, onQueries, onMove, onBack, onGenerate, onRegenerate }: {
+  snapshot: ArticleSnapshot; busy: string | null; onHeading: (index: number, value: string) => void; onPurpose: (index: number, value: string) => void; onEvidence: (index: number, value: string) => void; onQueries: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
 }) {
   return (
     <div className="stage-content">
-      <div className="topic-intro"><div><h2>先确认骨架，再写正文</h2><p>拖动思路被简化为上下移动；标题可直接编辑。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "outline"}><RefreshCw size={15} className={busy === "outline" ? "spin" : ""} /> 重做大纲</button></div>
+      <div className="topic-intro"><div><h2>这是作者与 AI 共用的研究任务单</h2><p>研究方向、核心问题、证据清单和检索词都可以修改；下步先联网搜集资料，再写读者成稿。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "outline"}><RefreshCw size={15} className={busy === "outline" ? "spin" : ""} /> 重做研究提纲</button></div>
       <div className="outline-list">
         {snapshot.outline.map((item, index) => (
           <article className="outline-item" key={item.id}>
             <div className="outline-number">{String(index + 1).padStart(2, "0")}</div>
             <div className="outline-body">
-              <input className="outline-heading-input" value={item.heading} onChange={(event) => onHeading(index, event.target.value)} aria-label={`第 ${index + 1} 章标题`} />
-              <p>{item.purpose}</p>
-              <ul>{item.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>
+              <label className="outline-edit-field"><span>研究方向（不会成为正文标题）</span><input className="outline-heading-input" value={item.heading} onChange={(event) => onHeading(index, event.target.value)} aria-label={`第 ${index + 1} 项研究方向`} /></label>
+              <label className="outline-edit-field"><span>希望回答的问题</span><textarea value={item.purpose} onChange={(event) => onPurpose(index, event.target.value)} rows={2} aria-label={`第 ${index + 1} 项核心问题`} /></label>
+              <div className="outline-field-grid">
+                <label className="outline-edit-field"><span>需要找到的证据（每行一项）</span><textarea value={item.bullets.join("\n")} onChange={(event) => onEvidence(index, event.target.value)} rows={3} aria-label={`第 ${index + 1} 项证据清单`} /></label>
+                <label className="outline-edit-field"><span>联网检索词（每行一条）</span><textarea value={(item.searchQueries ?? []).join("\n")} onChange={(event) => onQueries(index, event.target.value)} rows={3} aria-label={`第 ${index + 1} 项检索词`} /></label>
+              </div>
             </div>
             <div className="outline-actions"><button onClick={() => onMove(index, -1)} disabled={index === 0} aria-label="上移"><ArrowUp size={15} /></button><button onClick={() => onMove(index, 1)} disabled={index === snapshot.outline.length - 1} aria-label="下移"><ArrowDown size={15} /></button></div>
           </article>
         ))}
       </div>
-      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回选题</button><button className="button primary large" onClick={onGenerate} disabled={busy === "draft"}>{busy === "draft" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />} 生成正文初稿 <ArrowRight size={17} /></button></div>
+      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究角度</button><button className="button primary large" onClick={onGenerate} disabled={busy === "draft"}>{busy === "draft" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />} 联网研究并生成读者成稿 <ArrowRight size={17} /></button></div>
     </div>
   );
 }
@@ -1464,9 +1552,45 @@ function OutlineStage({ snapshot, busy, onHeading, onMove, onBack, onGenerate, o
 function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGenerateImages, onRegenerate, onAddStyle }: {
   snapshot: ArticleSnapshot; busy: string | null; onTitle: (value: string) => void; onDigest: (value: string) => void; onSection: (index: number, field: "heading" | "paragraphs", value: string) => void; onBack: () => void; onGenerateImages: () => void; onRegenerate: () => void; onAddStyle: () => void;
 }) {
+  const channelLabels: Record<NonNullable<ResearchSource["channel"]>, string> = {
+    user: "用户资料",
+    official: "区域官方源",
+    brave: "Brave News",
+    gdelt: "GDELT 补充",
+  };
+  const regionLabels: Record<NonNullable<ResearchSource["region"]>, string> = {
+    cn: "大陆",
+    hk: "香港",
+    tw: "台湾",
+    global: "全球",
+  };
+  const reportRegionLabels: Record<ResearchReport["region"], string> = {
+    auto: "自动识别",
+    cn: "中国大陆",
+    hk: "中国香港",
+    tw: "中国台湾",
+    all: "大陆 / 香港 / 台湾",
+  };
+  const report = snapshot.researchReport;
+  const fulltextCount = (snapshot.researchSources ?? []).filter((source) => source.retrieval === "fulltext").length;
   return (
     <div className="stage-content">
-      <div className="draft-toolbar"><span><FileText size={15} /> 约 {articleCharacterCount(snapshot)} 字</span><div className="draft-toolbar-actions"><button className="button ghost" onClick={onAddStyle}><Clipboard size={15} /> 将人工定稿收入范例库</button><button className="button ghost" onClick={onRegenerate} disabled={busy === "draft"}><RefreshCw size={15} className={busy === "draft" ? "spin" : ""} /> 重生成整篇</button></div></div>
+      <div className="draft-toolbar"><span><WandSparkles size={15} /> 双轮编辑成稿 · 约 {articleCharacterCount(snapshot)} 字</span><div className="draft-toolbar-actions"><button className="button ghost" onClick={onAddStyle}><Clipboard size={15} /> 将人工定稿收入范例库</button><button className="button ghost" onClick={onRegenerate} disabled={busy === "draft"}><RefreshCw size={15} className={busy === "draft" ? "spin" : ""} /> 重新编辑成稿</button></div></div>
+      {(Boolean(snapshot.researchSources?.length) || Boolean(report)) && (
+        <section className="research-source-panel">
+          <div className="research-source-heading"><div><strong>联网研究记录</strong><span>取得 {snapshot.researchSources?.length ?? 0} 个来源，其中 {fulltextCount} 个已读取正文；发布前仍需人工核对。</span></div>{report ? <span className="research-region-chip">重点地区：{reportRegionLabels[report.region]}</span> : null}</div>
+          {report?.channels.length ? <div className="research-channel-summary"><span>本次已使用</span>{report.channels.map((channel) => <b key={channel}>{channel}</b>)}</div> : null}
+          {report?.warnings.length ? <ul className="research-warnings">{report.warnings.map((warning) => <li key={warning}><CircleAlert size={12} />{warning}</li>)}</ul> : null}
+          <div className="research-source-links">
+            {(snapshot.researchSources ?? []).map((source, index) => (
+              <article className="research-source-item" key={`${source.url}-${index}`}>
+                <div className="research-source-badges"><span data-channel={source.channel ?? "user"}>{channelLabels[source.channel ?? "user"]}</span><span>{regionLabels[source.region ?? "global"]}</span><span>{source.retrieval === "fulltext" ? "已读正文" : "仅摘要"}</span></div>
+                <a href={source.url} target="_blank" rel="noreferrer"><span>{source.title}</span><ExternalLink size={12} /></a>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="article-editor">
         <input className="article-title-input" value={snapshot.title} onChange={(event) => onTitle(event.target.value)} aria-label="文章标题" />
         <textarea className="digest-input" value={snapshot.digest} onChange={(event) => onDigest(event.target.value)} rows={3} aria-label="文章摘要" />
@@ -1478,7 +1602,7 @@ function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGe
           </div>
         ))}
       </section>
-      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回大纲</button><button className="button primary large" onClick={onGenerateImages} disabled={busy === "images"}>{busy === "images" ? <LoaderCircle size={18} className="spin" /> : <ImageIcon size={18} />} 生成封面与正文配图 <ArrowRight size={17} /></button></div>
+      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究提纲</button><button className="button primary large" onClick={onGenerateImages} disabled={busy === "images"}>{busy === "images" ? <LoaderCircle size={18} className="spin" /> : <ImageIcon size={18} />} 生成封面与正文配图 <ArrowRight size={17} /></button></div>
     </div>
   );
 }
@@ -1547,5 +1671,5 @@ function PreviewPane({ snapshot }: { snapshot: ArticleSnapshot }) {
 }
 
 function EmptyPreview({ snapshot }: { snapshot: ArticleSnapshot }) {
-  return <div className="empty-preview"><span className="empty-preview-icon"><Sparkles size={22} /></span><h3>内容会在这里实时成形</h3><p>{snapshot.step === "brief" ? "先完成创作简报，系统会从选题角度开始。" : "确认选题与大纲后生成正文。"}</p><div><i /><i /><i /><i /></div></div>;
+  return <div className="empty-preview"><span className="empty-preview-icon"><Sparkles size={22} /></span><h3>内容会在这里实时成形</h3><p>{snapshot.step === "brief" ? "先完成创作简报，系统会从研究角度开始。" : "确认研究方向与检索任务后，再生成读者成稿。"}</p><div><i /><i /><i /><i /></div></div>;
 }

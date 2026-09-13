@@ -43,6 +43,8 @@ export function getQualityChecks(snapshot: ArticleSnapshot): QualityCheck[] {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("可粘贴"));
+  const researchSources = snapshot.researchSources ?? [];
+  const fulltextResearchCount = researchSources.filter((source) => source.retrieval === "fulltext").length;
   const count = articleCharacterCount(snapshot);
   const expectedMinimum = Number.parseInt(snapshot.brief.length.match(/\d+/)?.[0] ?? "400", 10);
   const rewriteLength = referenceMaterialText(snapshot.brief).length;
@@ -98,8 +100,10 @@ export function getQualityChecks(snapshot: ArticleSnapshot): QualityCheck[] {
     {
       id: "sources",
       label: "来源记录",
-      detail: sources.length ? `已记录 ${sources.length} 条参考资料` : "尚未添加可核验来源，发布前请人工复核事实",
-      status: sources.length ? "pass" : "warning",
+      detail: sources.length || researchSources.length
+        ? `已记录 ${sources.length + researchSources.length} 条参考资料，联网来源中 ${fulltextResearchCount} 条已读取正文`
+        : "尚未添加可核验来源，发布前请人工复核事实",
+      status: sources.length || fulltextResearchCount ? "pass" : "warning",
     },
     {
       id: "disclosure",
@@ -184,8 +188,13 @@ export async function exportPublicationPackage(snapshot: ArticleSnapshot) {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("可粘贴"));
+  const researchSources = snapshot.researchSources ?? [];
+  const researchReport = snapshot.researchReport;
+  const researchSummary = researchReport
+    ? `\n## 联网研究记录\n\n- 重点地区：${researchReport.region}\n- 已使用渠道：${researchReport.channels.join("、") || "未取得可用来源"}\n${researchReport.warnings.map((warning) => `- 检索提示：${warning}`).join("\n")}\n`
+    : "";
 
-  const instructions = `# 发布说明\n\n- 标题：${snapshot.title}\n- 摘要：${snapshot.digest}\n- 封面：03-封面-cover.png\n- 正文图片：${inlineImages.length} 张\n- 文章版本：V${snapshot.version}\n- 生成模式：${snapshot.generationMode === "ai" ? "OpenAI API" : "演示生成"}\n\n## 人工发布步骤\n\n1. 打开 01-正文-含插图位.html，全选并复制正文到微信公众号后台。\n2. 上传 03-封面-cover.png 作为封面。\n3. 从上到下找到 IMG-01、IMG-02 等提示框，上传 images/ 中的同名图片。\n4. 删除图片位置提示框，检查图注、标题和摘要。\n5. 使用微信后台手机预览，确认无误后发布。\n\n## 发布前提醒\n\n- 微信后台的实时字段限制与预览结果优先。\n- 请人工复核数字、人物身份、政策和专业建议。\n${snapshot.aiDisclosure ? "- 已建议保留：本文由 AI 辅助整理与生成，经作者人工编辑与审核。\n" : "- 当前未启用 AI 辅助标识，请确认是否符合适用规则。\n"}`;
+  const instructions = `# 发布说明\n\n- 标题：${snapshot.title}\n- 摘要：${snapshot.digest}\n- 封面：03-封面-cover.png\n- 正文图片：${inlineImages.length} 张\n- 文章版本：V${snapshot.version}\n- 生成模式：${snapshot.generationMode === "ai" ? "已配置 AI API" : "演示生成"}\n\n## 人工发布步骤\n\n1. 打开 01-正文-含插图位.html，全选并复制正文到微信公众号后台。\n2. 上传 03-封面-cover.png 作为封面。\n3. 从上到下找到 IMG-01、IMG-02 等提示框，上传 images/ 中的同名图片。\n4. 删除图片位置提示框，检查图注、标题和摘要。\n5. 使用微信后台手机预览，确认无误后发布。\n${researchSummary}\n## 发布前提醒\n\n- 微信后台的实时字段限制与预览结果优先。\n- 请人工复核数字、人物身份、政策和专业建议。\n${snapshot.aiDisclosure ? "- 已建议保留：本文由 AI 辅助整理与生成，经作者人工编辑与审核。\n" : "- 当前未启用 AI 辅助标识，请确认是否符合适用规则。\n"}`;
 
   const manifest = `# 插图清单\n\n${inlineImages
     .map((image) => `## ${image.slot}\n\n- 文件：images/${image.filename}\n- 位置：正文 ${image.slot} 提示框\n- 作用：${image.title}\n- 图注：${image.caption || "无"}\n- 来源：${image.source === "ai" ? "AI 生成" : "本地生成"}\n`)
@@ -194,6 +203,12 @@ export async function exportPublicationPackage(snapshot: ArticleSnapshot) {
     ["类型", "编号/名称", "来源", "说明"],
     ...snapshot.images.map((image) => ["图片", image.slot, image.source === "ai" ? "AI 生成" : "本地生成", image.prompt]),
     ...sources.map((source, index) => ["资料", `SOURCE-${String(index + 1).padStart(2, "0")}`, source, "用户提供"]),
+    ...researchSources.map((source, index) => [
+      "联网资料",
+      `WEB-${String(index + 1).padStart(2, "0")}`,
+      source.url,
+      `${source.title}｜渠道：${source.channel ?? "未知"}｜地区：${source.region ?? "global"}｜读取：${source.retrieval === "fulltext" ? "正文" : "摘要"}｜检索词：${source.query}`,
+    ]),
   ]
     .map((row) => row.map(csvCell).join(","))
     .join("\n");

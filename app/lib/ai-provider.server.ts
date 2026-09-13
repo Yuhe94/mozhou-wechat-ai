@@ -13,6 +13,7 @@ export type ProviderEnvironment = {
   DEEPSEEK_TEXT_MODEL?: string;
   KIMI_API_KEY?: string;
   KIMI_TEXT_MODEL?: string;
+  BRAVE_SEARCH_API_KEY?: string;
 };
 
 export type TextProviderConfig = {

@@ -64,6 +64,24 @@ export interface OutlineItem {
   heading: string;
   purpose: string;
   bullets: string[];
+  searchQueries?: string[];
+}
+
+export interface ResearchSource {
+  title: string;
+  url: string;
+  domain: string;
+  publishedAt?: string;
+  query: string;
+  channel?: "user" | "official" | "brave" | "gdelt";
+  region?: "cn" | "hk" | "tw" | "global";
+  retrieval?: "fulltext" | "snippet";
+}
+
+export interface ResearchReport {
+  region: "auto" | "cn" | "hk" | "tw" | "all";
+  channels: string[];
+  warnings: string[];
 }
 
 export interface ArticleSection {
@@ -92,6 +110,8 @@ export interface ArticleSnapshot {
   topics: TopicAngle[];
   selectedTopicId: string | null;
   outline: OutlineItem[];
+  researchSources?: ResearchSource[];
+  researchReport?: ResearchReport;
   title: string;
   digest: string;
   sections: ArticleSection[];
@@ -159,9 +179,9 @@ export const WORKFLOW_STEPS: Array<{
   description: string;
 }> = [
   { id: "brief", index: "01", label: "创作简报", description: "明确主题与读者" },
-  { id: "topics", index: "02", label: "选题角度", description: "选择叙事切口" },
-  { id: "outline", index: "03", label: "文章大纲", description: "确认内容骨架" },
-  { id: "draft", index: "04", label: "正文编辑", description: "成稿与局部修改" },
+  { id: "topics", index: "02", label: "研究角度", description: "选择分析方向" },
+  { id: "outline", index: "03", label: "研究提纲", description: "编辑问题与检索词" },
+  { id: "draft", index: "04", label: "读者成稿", description: "终审改写与编辑" },
   { id: "visuals", index: "05", label: "配图排版", description: "生成插图与预览" },
   { id: "check", index: "06", label: "检查导出", description: "生成发布交付包" },
 ];
@@ -186,6 +206,8 @@ export function createBlankSnapshot(): ArticleSnapshot {
     topics: [],
     selectedTopicId: null,
     outline: [],
+    researchSources: [],
+    researchReport: undefined,
     title: "",
     digest: "",
     sections: [],

@@ -68,7 +68,7 @@ function buildDemoRewriteDraft(
     };
   });
   return {
-    title: angle.title || `换个角度理解：${referenceTopic(brief)}`,
+    title: `${referenceTopic(brief)}，原文没有讲清楚的几个问题`,
     digest: `在不新增事实的前提下，重新组织参考文章关于「${referenceTopic(brief)}」的核心信息与表达顺序。`,
     sections,
   };
@@ -80,15 +80,15 @@ export function buildDemoTopics(brief: Brief): TopicAngle[] {
   return [
     {
       id: "angle-context",
-      title: `看懂「${topic}」：先厘清已知信息，再判断真实影响`,
-      hook: "从读者最容易混淆的信息切入，把事实、观点和待核实内容分开。",
+      title: "事实边界与制度背景",
+      hook: `围绕「${topic}」先定位读者最容易混淆的信息，把事实、观点和待核内容分开。`,
       thesis: `对${audience}而言，理解这一主题的第一步不是追随热度，而是建立清晰、可靠的信息框架。`,
       readerGain: "快速掌握背景、核心问题和需要继续核实的信息。",
       evidenceNeeds: ["事件或主题背景", "权威来源与时间线", "仍待核实的问题"],
     },
     {
       id: "angle-contrarian",
-      title: `${topic}：最值得关注的，可能不是热度本身`,
+      title: "热度背后的关键矛盾",
       hook: "从一个容易被忽略的矛盾切入，区分表面讨论与真正影响。",
       thesis: "热点会变化，但事件背后的原因、影响对象和判断边界更值得持续关注。",
       readerGain: "获得一个不被单一热搜叙事带着走的观察角度。",
@@ -96,7 +96,7 @@ export function buildDemoTopics(brief: Brief): TopicAngle[] {
     },
     {
       id: "angle-timeline",
-      title: `从发生到影响：用一条时间线理解「${topic}」`,
+      title: "时间线与影响路径",
       hook: "沿着关键节点推进，让复杂信息变得容易跟随。",
       thesis: "把前因、节点和后续影响放在同一条时间线上，才能避免只看见孤立片段。",
       readerGain: "看清事件如何发展，以及接下来应该关注哪些可靠信号。",
@@ -109,27 +109,31 @@ export function buildDemoOutline(angle: TopicAngle): OutlineItem[] {
   return [
     {
       id: "outline-1",
-      heading: "发生了什么：先把背景与已知信息说清楚",
+      heading: "把消息放回它原本的时间线",
       purpose: `为“${angle.title}”建立可靠的事实起点。`,
       bullets: ["交代主题背景", "梳理关键节点", "标注仍待核实的信息"],
+      searchQueries: [`${angle.title} 官方信息 时间线`, `${angle.title} official timeline`],
     },
     {
       id: "outline-2",
-      heading: "为什么值得关注：拆解真正的核心问题",
+      heading: "热度之外，变化究竟发生在哪里",
       purpose: "从表面热度进入原因、矛盾和关键判断。",
       bullets: ["区分事实与观点", "分析主要原因", "说明核心争议"],
+      searchQueries: [`${angle.title} 争议 原因`, `${angle.title} analysis`],
     },
     {
       id: "outline-3",
-      heading: "影响会落在哪里：区分人群、场景与时间",
+      heading: "谁会先感受到变化",
       purpose: "把抽象讨论转化为读者能够理解的具体影响。",
       bullets: ["识别受影响群体", "区分短期与长期", "避免过度推断"],
+      searchQueries: [`${angle.title} 影响 数据`, `${angle.title} impact data`],
     },
     {
       id: "outline-4",
-      heading: "接下来怎么看：给出判断边界与行动建议",
+      heading: "接下来要等的，是更具体的信号",
       purpose: "用可执行、不过度承诺的建议收束全文。",
       bullets: ["关注可靠来源", "列出观察信号", "说明不确定性", "给出下一步建议"],
+      searchQueries: [`${angle.title} 最新进展`, `${angle.title} latest update`],
     },
   ];
 }
@@ -178,7 +182,7 @@ export function buildDemoDraft(
   const compactLimit = minimum <= 600 ? 110 : minimum <= 1200 ? 230 : null;
 
   return {
-    title: angle.title,
+    title: `${topic}：正式动笔前，还需要补齐这些事实`,
     digest: `围绕「${topic}」，文章按照背景、核心问题、现实影响和后续判断四个层次梳理信息，并明确区分已知事实与待核内容。`,
     sections: outline.map((item, index) => ({
       id: `section-${index + 1}`,

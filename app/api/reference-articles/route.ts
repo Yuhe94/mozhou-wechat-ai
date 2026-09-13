@@ -238,7 +238,7 @@ async function fetchArticlePage(input: URL) {
   throw new Error("文章页面跳转次数过多");
 }
 
-async function readArticle(value: string): Promise<ReferenceArticle> {
+export async function readArticle(value: string): Promise<ReferenceArticle> {
   const input = validateArticleUrl(value);
   const { html, finalUrl } = await fetchArticlePage(input);
   const structured = jsonLdArticle(html);

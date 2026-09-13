@@ -30,7 +30,7 @@ test("server-renders the Mozhou writing workspace", async () => {
   assert.match(html, /参考改写/);
   assert.match(html, /社会热点/);
   assert.match(html, /400–600 字/);
-  assert.match(html, /生成选题角度/);
+  assert.match(html, /生成研究角度/);
   assert.match(html, /手机预览/);
   assert.doesNotMatch(html, /Your site is taking shape|codex-preview|react-loading-skeleton/);
 });
@@ -147,15 +147,50 @@ test("returns upstream HTTP errors without exposing API keys", async () => {
   }
 });
 
+test("layers a matching mainland official source into research discovery", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("YAOWENLIEBIAO.json")) {
+      return Response.json([{ TITLE: "中国将在2027年接任金砖主席国", URL: "https://www.gov.cn/zhengce/202609/content_123.htm", DOCRELPUBTIME: "2026-09-13" }]);
+    }
+    if (url.includes("api.gdeltproject.org")) return Response.json({ articles: [] });
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { createServer } = await import("vite");
+  const vite = await createServer({
+    configFile: false,
+    root: new URL("../", import.meta.url).pathname,
+    logLevel: "silent",
+    server: { middlewareMode: true },
+  });
+  try {
+    const { discoverResearchSources } = await vite.ssrLoadModule("/app/lib/news-research.server.ts");
+    const discovery = await discoverResearchSources(
+      { creationMode: "original", topic: "中国将于2027年接任金砖主席国", audience: "普通读者", goal: "解释轮值意义", tone: "克制", length: "400–600 字", callToAction: "继续观察官方信息", sourcesText: "" },
+      [{ id: "research-1", heading: "轮值制度", purpose: "核对安排", bullets: ["官方资料"], searchQueries: ["中国 2027 金砖 主席国", "China BRICS chair 2027"] }],
+      { provider: "public", region: "cn", braveApiKey: "" },
+    );
+    assert.equal(discovery.seeds[0].source.channel, "official");
+    assert.equal(discovery.seeds[0].source.region, "cn");
+    assert.equal(discovery.seeds[0].source.retrieval, "fulltext");
+    assert.deepEqual(discovery.channels, ["地区官方源"]);
+  } finally {
+    await vite.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("ships the required creation, rewriting, hotspot, storage, and export surfaces", async () => {
   const root = new URL("../", import.meta.url);
-  const [workspace, generator, demoEngine, providerRoute, providerAdapter, aiSettings, hotspots, references, packager, productTypes, schema, hosting] = await Promise.all([
+  const [workspace, generator, demoEngine, providerRoute, providerAdapter, aiSettings, newsResearch, hotspots, references, packager, productTypes, schema, hosting] = await Promise.all([
     readFile(new URL("app/workspace.tsx", root), "utf8"),
     readFile(new URL("app/api/generate/route.ts", root), "utf8"),
     readFile(new URL("app/lib/demo-engine.ts", root), "utf8"),
     readFile(new URL("app/api/provider-test/route.ts", root), "utf8"),
     readFile(new URL("app/lib/ai-provider.server.ts", root), "utf8"),
     readFile(new URL("app/lib/ai-settings.ts", root), "utf8"),
+    readFile(new URL("app/lib/news-research.server.ts", root), "utf8"),
     readFile(new URL("app/api/hotspots/route.ts", root), "utf8"),
     readFile(new URL("app/api/reference-articles/route.ts", root), "utf8"),
     readFile(new URL("app/lib/publish-package.client.ts", root), "utf8"),
@@ -178,14 +213,18 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(workspace, /AI 模型设置/);
   assert.match(workspace, /\/api\/provider-test/);
   assert.match(workspace, /generationHeaders/);
+  assert.match(workspace, /联网新闻研究/);
+  assert.match(workspace, /Brave News \+ 区域官方源/);
+  assert.match(workspace, /联网研究记录/);
   assert.match(generator, /generateCompatibleText/);
   assert.match(generator, /generateCompatibleImage/);
   assert.match(generator, /参考原文改写/);
   assert.match(generator, /parseStructuredOutput/);
   assert.match(generator, /normalizeBriefForGeneration/);
   assert.match(generator, /topic 字段是文章唯一核心/);
-  assert.match(demoEngine, /看懂「\$\{topic\}」/);
-  assert.match(demoEngine, /发生了什么：先把背景与已知信息说清楚/);
+  assert.match(demoEngine, /事实边界与制度背景/);
+  assert.match(demoEngine, /把消息放回它原本的时间线/);
+  assert.doesNotMatch(demoEngine, /发生了什么：先把背景与已知信息说清楚/);
   assert.doesNotMatch(demoEngine, /AI 应该负责什么|别急着追工具|AI 内容方案/);
   assert.match(generator, /模型返回的 JSON 内容不完整/);
   assert.match(providerRoute, /连接检测助手/);
@@ -198,6 +237,15 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(aiSettings, /deepseek-v4-flash/);
   assert.match(aiSettings, /kimi-k3/);
   assert.match(aiSettings, /gpt-image-2/);
+  assert.match(aiSettings, /newsSearchProvider/);
+  assert.match(aiSettings, /x-mozhou-news-region/);
+  assert.match(newsResearch, /api\.search\.brave\.com\/res\/v1\/news\/search/);
+  assert.match(newsResearch, /api\.gdeltproject\.org\/api\/v2\/doc\/doc/);
+  assert.match(newsResearch, /www\.gov\.cn\/yaowen\/liebiao\/YAOWENLIEBIAO\.json/);
+  assert.match(newsResearch, /www\.info\.gov\.hk\/gia\/rss\/general_zh\.xml/);
+  assert.match(newsResearch, /www\.ey\.gov\.tw\/NewOpenData\/JSON\/154/);
+  assert.match(newsResearch, /GDELT 需要英文检索词/);
+  assert.match(newsResearch, /Brave News 暂不可用，已改用 GDELT 补充/);
   assert.match(hotspots, /weibo\.com\/ajax\/side\/hotSearch/);
   assert.match(hotspots, /s\.weibo\.com\/top\/summary/);
   assert.match(hotspots, /toutiao\.com\/hot-event\/hot-board/);
@@ -247,6 +295,20 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /资深公众号主编/);
   assert.match(generator, /在当今快速发展的时代/);
   assert.match(generator, /相关范例片段/);
+  assert.match(generator, /FINAL_EDIT_SYSTEM/);
+  assert.match(generator, /READER_ARTICLE_RULES/);
+  assert.match(generator, /editorPass: qualityIssues\.length/);
+  assert.match(generator, /禁止使用“发生了什么”“为什么值得关注”/);
+  assert.match(generator, /readerDraftIssues/);
+  assert.match(generator, /上一版仍未通过成稿检查/);
+  assert.match(generator, /discoverResearchSources/);
+  assert.match(generator, /researchReport/);
+  assert.match(generator, /collectOnlineResearch/);
+  assert.match(generator, /研究角度只是内部方向/);
+  assert.match(workspace, /联网研究并生成读者成稿/);
+  assert.match(workspace, /作者与 AI 共用的研究任务单/);
+  assert.match(workspace, /联网检索词/);
+  assert.match(workspace, /选择研究角度，不是文章标题/);
   assert.match(libraryRoute, /rebuildDeterministicProfile/);
   assert.match(contextRoute, /buildWritingStyleContext/);
   assert.match(styleProfile, /titlePatterns/);
