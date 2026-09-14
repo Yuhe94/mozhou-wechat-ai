@@ -165,7 +165,14 @@ test("layers a matching mainland official source into research discovery", async
     server: { middlewareMode: true },
   });
   try {
-    const { discoverResearchSources } = await vite.ssrLoadModule("/app/lib/news-research.server.ts");
+    const { discoverResearchSources, parseWechatSearchResults } = await vite.ssrLoadModule("/app/lib/news-research.server.ts");
+    const wechat = parseWechatSearchResults(
+      '<ul><li id="sogou_vr_11002601_box_0"><div class="txt-box"><h3><a href="/link?url=abc&amp;type=2">Bin回应AL夺冠：赛后采访原话</a></h3><p class="txt-info">主持人在赛后采访中询问决赛失利，选手回应了比赛结果、对手表现以及接下来的备战安排。</p><span class="all-time-y2">电竞观察</span></div></li></ul>',
+      "Bin回应AL夺冠",
+    );
+    assert.equal(wechat[0].source.channel, "wechat");
+    assert.equal(wechat[0].source.retrieval, "snippet");
+    assert.match(wechat[0].source.title, /电竞观察/);
     const discovery = await discoverResearchSources(
       { creationMode: "original", topic: "中国将于2027年接任金砖主席国", audience: "普通读者", goal: "解释轮值意义", tone: "克制", length: "400–600 字", callToAction: "继续观察官方信息", sourcesText: "" },
       [{ id: "research-1", heading: "轮值制度", purpose: "核对安排", bullets: ["官方资料"], searchQueries: ["中国 2027 金砖 主席国", "China BRICS chair 2027"] }],
@@ -175,6 +182,46 @@ test("layers a matching mainland official source into research discovery", async
     assert.equal(discovery.seeds[0].source.region, "cn");
     assert.equal(discovery.seeds[0].source.retrieval, "fulltext");
     assert.deepEqual(discovery.channels, ["地区官方源"]);
+  } finally {
+    await vite.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("returns to Toutiao search and prioritizes related hotspot articles", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoded = (value) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const result = (title, url) => `<article cr-params="${encoded(JSON.stringify({ title, url, cell_type: 67 }))}"></article>`;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("so.toutiao.com/search")) {
+      return new Response([
+        result("Bin赛后回应AL夺冠，原话与争议焦点", "https://article.zlink.toutiao.com/J4dQM?h5_url=https%3A%2F%2Fnews-one.cn%2Fbin-response"),
+        result("AL夺冠后Bin回应引发讨论", "https://news-two.cn/al-champion"),
+      ].join(""), { headers: { "content-type": "text/html" } });
+    }
+    if (url.includes("YAOWENLIEBIAO.json")) return Response.json([]);
+    if (url.includes("api.gdeltproject.org")) return Response.json({ articles: [] });
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  const { createServer } = await import("vite");
+  const vite = await createServer({
+    configFile: false,
+    root: new URL("../", import.meta.url).pathname,
+    logLevel: "silent",
+    server: { middlewareMode: true },
+  });
+  try {
+    const { discoverResearchSources } = await vite.ssrLoadModule("/app/lib/news-research.server.ts");
+    const discovery = await discoverResearchSources(
+      { creationMode: "hotspot", topic: "Bin回应AL夺冠", audience: "普通读者", goal: "还原事件", tone: "自然", length: "400–600 字", callToAction: "了解背景", sourcesText: "热点来源：今日头条热榜｜https://www.toutiao.com/trending/123" },
+      [{ id: "research-1", heading: "原话", purpose: "核对上下文", bullets: ["采访"], searchQueries: ["Bin 回应 AL 夺冠", "Bin AL championship response"] }],
+      { provider: "public", region: "cn", braveApiKey: "" },
+    );
+    assert.equal(discovery.seeds.length, 2);
+    assert.equal(discovery.seeds[0].source.channel, "platform");
+    assert.equal(discovery.seeds[0].source.url, "https://news-one.cn/bin-response");
+    assert.deepEqual(discovery.channels, ["热搜平台相关文章"]);
   } finally {
     await vite.close();
     globalThis.fetch = originalFetch;
@@ -246,6 +293,11 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(newsResearch, /www\.ey\.gov\.tw\/NewOpenData\/JSON\/154/);
   assert.match(newsResearch, /GDELT 需要英文检索词/);
   assert.match(newsResearch, /Brave News 暂不可用，已改用 GDELT 补充/);
+  assert.match(newsResearch, /so\.toutiao\.com\/search/);
+  assert.match(newsResearch, /weixin\.sogou\.com\/weixin/);
+  assert.match(newsResearch, /热搜平台相关文章/);
+  assert.match(newsResearch, /公众号文章/);
+  assert.match(newsResearch, /微博讨论页要求访客验证/);
   assert.match(hotspots, /weibo\.com\/ajax\/side\/hotSearch/);
   assert.match(hotspots, /s\.weibo\.com\/top\/summary/);
   assert.match(hotspots, /toutiao\.com\/hot-event\/hot-board/);
@@ -304,8 +356,12 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /discoverResearchSources/);
   assert.match(generator, /researchReport/);
   assert.match(generator, /collectOnlineResearch/);
+  assert.match(generator, /needsResearch: true/);
+  assert.match(generator, /researchMode: "insufficient"/);
+  assert.match(generator, /把检索失败和资料不足写进了面向读者的正文/);
   assert.match(generator, /研究角度只是内部方向/);
   assert.match(workspace, /联网研究并生成读者成稿/);
+  assert.match(workspace, /资料还不够，本次没有生成正文/);
   assert.match(workspace, /作者与 AI 共用的研究任务单/);
   assert.match(workspace, /联网检索词/);
   assert.match(workspace, /选择研究角度，不是文章标题/);

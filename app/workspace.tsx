@@ -668,12 +668,24 @@ export default function Workspace({ displayName }: { displayName: string }) {
       const data = await runGeneration<{
         mode: "ai" | "demo";
         editorPass?: "final" | "working-draft";
-        researchMode?: "online" | "brief-only";
-        draft: Pick<ArticleSnapshot, "title" | "digest" | "sections">;
+        researchMode?: "online" | "brief-only" | "insufficient";
+        needsResearch?: boolean;
+        draft?: Pick<ArticleSnapshot, "title" | "digest" | "sections">;
         researchSources?: ResearchSource[];
         researchReport?: ResearchReport;
         warning?: string;
       }>({ action: "draft", brief: snapshot.brief, angle, outline: snapshot.outline, styleContext });
+      if (data.needsResearch || !data.draft) {
+        updateSnapshot((current) => ({
+          ...current,
+          researchSources: data.researchSources ?? [],
+          researchReport: data.researchReport,
+          step: "outline",
+          generationMode: data.mode,
+        }));
+        setNotice({ type: "error", text: data.warning || "资料不足，本次没有生成正文。" });
+        return;
+      }
       updateSnapshot((current) => ({
         ...current,
         ...data.draft,
@@ -1308,13 +1320,13 @@ function AiSettingsDialog({
           </section>
 
           <section className="settings-section">
-            <div className="settings-section-title"><span>02</span><div><h3>联网新闻研究</h3><p>优先读取大陆、香港、台湾的区域来源，再用全球新闻搜索补充。</p></div></div>
+            <div className="settings-section-title"><span>02</span><div><h3>联网新闻研究</h3><p>热点先回到来源平台读取相关文章，同时搜索公众号，再用区域官方源和全球新闻搜索交叉核验。</p></div></div>
             <div className="settings-grid">
               <label className="settings-field"><span>检索方式</span><select value={settings.newsSearchProvider} onChange={(event) => onChange({ newsSearchProvider: event.target.value as NewsSearchProviderId })}><option value="auto">自动分层（推荐）</option><option value="brave">Brave News + 区域官方源</option><option value="public">区域官方源 + GDELT</option></select></label>
               <label className="settings-field"><span>重点地区</span><select value={settings.newsRegion} onChange={(event) => onChange({ newsRegion: event.target.value as NewsRegionId })}><option value="auto">根据选题自动识别</option><option value="cn">中国大陆</option><option value="hk">中国香港</option><option value="tw">中国台湾</option><option value="all">大陆 / 香港 / 台湾</option></select></label>
               {settings.newsSearchProvider !== "public" ? <label className="settings-field full"><span>Brave Search API Key{settings.newsSearchProvider === "auto" ? "（选填）" : ""}</span><div className="secret-input"><input type={showKeys ? "text" : "password"} value={settings.newsSearchApiKey} onChange={(event) => onChange({ newsSearchApiKey: event.target.value })} autoComplete="off" placeholder={settings.newsSearchProvider === "auto" ? "留空时使用区域官方源和 GDELT 降级检索" : "BSA-..."} /><button type="button" onClick={() => setShowKeys((current) => !current)}>{showKeys ? "隐藏" : "显示"}</button></div></label> : null}
             </div>
-            <p className="settings-hint">自动模式会优先使用区域官方来源；有 Brave Key 时补充商业新闻搜索，没有 Key 或请求失败时才降级到 GDELT。GDELT 只作为全球线索补充，不作为中国新闻唯一来源。</p>
+            <p className="settings-hint">热点模式先读取今日头条站内相关文章，并搜索公开公众号文章；微博或公众号遇到访客验证时会明确提示。随后加入区域官方源；有 Brave Key 时补充商业新闻搜索，没有 Key 时才使用 GDELT。只有取得至少两篇有效正文才会成稿。</p>
           </section>
 
           <section className="settings-section">
@@ -1525,9 +1537,22 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
 function OutlineStage({ snapshot, busy, onHeading, onPurpose, onEvidence, onQueries, onMove, onBack, onGenerate, onRegenerate }: {
   snapshot: ArticleSnapshot; busy: string | null; onHeading: (index: number, value: string) => void; onPurpose: (index: number, value: string) => void; onEvidence: (index: number, value: string) => void; onQueries: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
 }) {
+  const blockedReport = snapshot.researchReport?.status === "insufficient" ? snapshot.researchReport : null;
   return (
     <div className="stage-content">
       <div className="topic-intro"><div><h2>这是作者与 AI 共用的研究任务单</h2><p>研究方向、核心问题、证据清单和检索词都可以修改；下步先联网搜集资料，再写读者成稿。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "outline"}><RefreshCw size={15} className={busy === "outline" ? "spin" : ""} /> 重做研究提纲</button></div>
+      {blockedReport ? (
+        <section className="research-blocker" role="status">
+          <CircleAlert size={19} />
+          <div>
+            <strong>资料还不够，本次没有生成正文</strong>
+            <p>系统已从热搜来源平台尝试读取相关文章，但不会再用“查不到”或“只能确认词条存在”凑成一篇文章。</p>
+            {blockedReport.missingEvidence?.length ? <ul>{blockedReport.missingEvidence.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+            {blockedReport.warnings.length ? <small>{blockedReport.warnings.join("；")}</small> : null}
+            {snapshot.researchSources?.length ? <div className="research-blocker-links">{snapshot.researchSources.map((source, index) => <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">已找到：{source.title}<ExternalLink size={11} /></a>)}</div> : null}
+          </div>
+        </section>
+      ) : null}
       <div className="outline-list">
         {snapshot.outline.map((item, index) => (
           <article className="outline-item" key={item.id}>
@@ -1544,7 +1569,7 @@ function OutlineStage({ snapshot, busy, onHeading, onPurpose, onEvidence, onQuer
           </article>
         ))}
       </div>
-      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究角度</button><button className="button primary large" onClick={onGenerate} disabled={busy === "draft"}>{busy === "draft" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />} 联网研究并生成读者成稿 <ArrowRight size={17} /></button></div>
+      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究角度</button><button className="button primary large" onClick={onGenerate} disabled={busy === "draft"}>{busy === "draft" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />} {blockedReport ? "按修改后的检索词重试" : "联网研究并生成读者成稿"} <ArrowRight size={17} /></button></div>
     </div>
   );
 }
@@ -1554,6 +1579,8 @@ function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGe
 }) {
   const channelLabels: Record<NonNullable<ResearchSource["channel"]>, string> = {
     user: "用户资料",
+    platform: "热搜平台相关文章",
+    wechat: "公众号文章",
     official: "区域官方源",
     brave: "Brave News",
     gdelt: "GDELT 补充",

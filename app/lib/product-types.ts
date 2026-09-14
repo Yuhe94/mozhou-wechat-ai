@@ -73,7 +73,7 @@ export interface ResearchSource {
   domain: string;
   publishedAt?: string;
   query: string;
-  channel?: "user" | "official" | "brave" | "gdelt";
+  channel?: "user" | "platform" | "wechat" | "official" | "brave" | "gdelt";
   region?: "cn" | "hk" | "tw" | "global";
   retrieval?: "fulltext" | "snippet";
 }
@@ -82,6 +82,8 @@ export interface ResearchReport {
   region: "auto" | "cn" | "hk" | "tw" | "all";
   channels: string[];
   warnings: string[];
+  status?: "ready" | "insufficient";
+  missingEvidence?: string[];
 }
 
 export interface ArticleSection {

@@ -1518,6 +1518,16 @@ button:disabled {
   color: #426b5a;
 }
 
+.research-source-badges span[data-channel="platform"] {
+  background: #fae8df;
+  color: #b54c2d;
+}
+
+.research-source-badges span[data-channel="wechat"] {
+  background: #e5f1e8;
+  color: #2f7650;
+}
+
 .research-source-badges span[data-channel="brave"] {
   background: #e8edf8;
   color: #4d6092;
@@ -1543,6 +1553,26 @@ button:disabled {
   color: #9b542f;
   font-size: 9px;
 }
+
+.research-blocker {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #e5b9a7;
+  border-radius: 13px;
+  background: #fff5ef;
+  padding: 16px 18px;
+  color: #9b452b;
+}
+
+.research-blocker > svg { flex: 0 0 auto; margin-top: 2px; }
+.research-blocker > div { display: grid; gap: 7px; }
+.research-blocker strong { color: var(--ink); font-size: 13px; }
+.research-blocker p,
+.research-blocker small { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.65; }
+.research-blocker ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; color: #83442f; font-size: 10px; }
+.research-blocker-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.research-blocker-links a { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; background: var(--paper); padding: 5px 8px; color: var(--ink-soft); font-size: 9px; text-decoration: none; }
 
 .research-source-links {
   display: grid;
