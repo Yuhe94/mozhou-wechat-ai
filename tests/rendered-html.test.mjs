@@ -147,6 +147,30 @@ test("returns upstream HTTP errors without exposing API keys", async () => {
   }
 });
 
+test("creates an editable narrative route with a non-fixed research task count", async () => {
+  const { createServer } = await import("vite");
+  const vite = await createServer({
+    configFile: false,
+    root: new URL("../", import.meta.url).pathname,
+    logLevel: "silent",
+    server: { middlewareMode: true },
+  });
+  try {
+    const { buildDemoOutline, buildDemoResearchPlan } = await vite.ssrLoadModule("/app/lib/demo-engine.ts");
+    const brief = { creationMode: "hotspot", topic: "涨工资的三重信号", audience: "普通职工", goal: "解释适用范围", tone: "自然", length: "800–1200 字", callToAction: "核对自身情况", sourcesText: "" };
+    const angle = { id: "angle-1", title: "谁真正被覆盖", hook: "哪些人能直接受益", thesis: "三类政策对象不同", readerGain: "判断是否与自己有关", evidenceNeeds: ["适用范围"] };
+    const plan = buildDemoResearchPlan(brief, angle);
+    const outline = buildDemoOutline(angle, brief);
+    assert.match(plan.centralQuestion, /涨工资的三重信号/);
+    assert.match(plan.narrativeRoute, /一句话或一个动作/);
+    assert.equal(outline.length, 3);
+    assert.equal(outline[2].bullets.length, 1);
+    assert.ok(outline.flatMap((item) => item.searchQueries).every((query) => !/[a-z]{4}/i.test(query)));
+  } finally {
+    await vite.close();
+  }
+});
+
 test("layers a matching mainland official source into research discovery", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
@@ -270,7 +294,8 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(generator, /normalizeBriefForGeneration/);
   assert.match(generator, /topic 字段是文章唯一核心/);
   assert.match(demoEngine, /事实边界与制度背景/);
-  assert.match(demoEngine, /把消息放回它原本的时间线/);
+  assert.match(demoEngine, /buildDemoResearchPlan/);
+  assert.match(demoEngine, /不做百科式背景罗列/);
   assert.doesNotMatch(demoEngine, /发生了什么：先把背景与已知信息说清楚/);
   assert.doesNotMatch(demoEngine, /AI 应该负责什么|别急着追工具|AI 内容方案/);
   assert.match(generator, /模型返回的 JSON 内容不完整/);
@@ -359,10 +384,14 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /needsResearch: true/);
   assert.match(generator, /researchMode: "insufficient"/);
   assert.match(generator, /把检索失败和资料不足写进了面向读者的正文/);
-  assert.match(generator, /研究角度只是内部方向/);
+  assert.match(generator, /作者确定的核心追问与叙事路线/);
+  assert.match(generator, /不是套用“背景—原因—影响—建议”的固定目录/);
+  assert.match(generator, /outline 为 2–5 项，任务之间不要同构/);
   assert.match(workspace, /联网研究并生成读者成稿/);
   assert.match(workspace, /资料还不够，本次没有生成正文/);
-  assert.match(workspace, /作者与 AI 共用的研究任务单/);
+  assert.match(workspace, /先定这篇文章怎么走，再决定查什么/);
+  assert.match(workspace, /唯一核心追问/);
+  assert.match(workspace, /主动舍弃/);
   assert.match(workspace, /联网检索词/);
   assert.match(workspace, /选择研究角度，不是文章标题/);
   assert.match(libraryRoute, /rebuildDeterministicProfile/);

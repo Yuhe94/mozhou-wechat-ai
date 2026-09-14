@@ -64,6 +64,7 @@ import {
   type Hotspot,
   type OutlineItem,
   type ReferenceArticle,
+  type ResearchPlan,
   type ResearchReport,
   type ResearchSource,
   type StoredArticle,
@@ -187,6 +188,7 @@ function resetGeneratedContent(
     brief,
     topics: [],
     selectedTopicId: null,
+    researchPlan: undefined,
     outline: [],
     researchSources: [],
     researchReport: undefined,
@@ -615,6 +617,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
         ...current,
         topics: data.topics,
         selectedTopicId: data.topics[0]?.id ?? null,
+        researchPlan: undefined,
         outline: [],
         researchSources: [],
         researchReport: undefined,
@@ -638,7 +641,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
     setBusy("outline");
     try {
       const styleContext = await loadWritingStyleContext(`${snapshot.brief.topic} ${angle.title}`);
-      const data = await runGeneration<{ mode: "ai" | "demo"; outline: OutlineItem[]; warning?: string }>({
+      const data = await runGeneration<{ mode: "ai" | "demo"; researchPlan?: ResearchPlan; outline: OutlineItem[]; warning?: string }>({
         action: "outline",
         brief: snapshot.brief,
         angle,
@@ -646,6 +649,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
       });
       updateSnapshot((current) => ({
         ...current,
+        researchPlan: data.researchPlan,
         outline: data.outline,
         researchSources: [],
         researchReport: undefined,
@@ -674,7 +678,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
         researchSources?: ResearchSource[];
         researchReport?: ResearchReport;
         warning?: string;
-      }>({ action: "draft", brief: snapshot.brief, angle, outline: snapshot.outline, styleContext });
+      }>({ action: "draft", brief: snapshot.brief, angle, researchPlan: snapshot.researchPlan, outline: snapshot.outline, styleContext });
       if (data.needsResearch || !data.draft) {
         updateSnapshot((current) => ({
           ...current,
@@ -998,6 +1002,18 @@ export default function Workspace({ displayName }: { displayName: string }) {
             <OutlineStage
               snapshot={snapshot}
               busy={busy}
+              onPlan={(field, value) =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  researchPlan: {
+                    centralQuestion: current.researchPlan?.centralQuestion ?? "",
+                    readerTension: current.researchPlan?.readerTension ?? "",
+                    narrativeRoute: current.researchPlan?.narrativeRoute ?? "",
+                    exclusion: current.researchPlan?.exclusion ?? "",
+                    [field]: value,
+                  },
+                }))
+              }
               onHeading={(index, value) =>
                 updateSnapshot((current) => ({
                   ...current,
@@ -1515,7 +1531,7 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
             <button className={`topic-card ${selected ? "selected" : ""}`} key={topic.id} onClick={() => onSelect(topic.id)}>
               <span className="topic-index">0{index + 1}</span>
               <span className={`radio-mark ${selected ? "checked" : ""}`}>{selected && <Check size={13} />}</span>
-              <span className="topic-strategy">{index === 0 ? "事实方向" : index === 1 ? "矛盾方向" : "时间方向"}</span>
+              <span className="topic-strategy">研究候选 {String.fromCharCode(65 + index)}</span>
               <small className="internal-label">内部研究角度</small>
               <h3>{topic.title}</h3>
               <p className="topic-hook">{topic.hook}</p>
@@ -1534,13 +1550,14 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
   );
 }
 
-function OutlineStage({ snapshot, busy, onHeading, onPurpose, onEvidence, onQueries, onMove, onBack, onGenerate, onRegenerate }: {
-  snapshot: ArticleSnapshot; busy: string | null; onHeading: (index: number, value: string) => void; onPurpose: (index: number, value: string) => void; onEvidence: (index: number, value: string) => void; onQueries: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
+function OutlineStage({ snapshot, busy, onPlan, onHeading, onPurpose, onEvidence, onQueries, onMove, onBack, onGenerate, onRegenerate }: {
+  snapshot: ArticleSnapshot; busy: string | null; onPlan: (field: keyof ResearchPlan, value: string) => void; onHeading: (index: number, value: string) => void; onPurpose: (index: number, value: string) => void; onEvidence: (index: number, value: string) => void; onQueries: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
 }) {
   const blockedReport = snapshot.researchReport?.status === "insufficient" ? snapshot.researchReport : null;
+  const plan = snapshot.researchPlan ?? { centralQuestion: "", readerTension: "", narrativeRoute: "", exclusion: "" };
   return (
     <div className="stage-content">
-      <div className="topic-intro"><div><h2>这是作者与 AI 共用的研究任务单</h2><p>研究方向、核心问题、证据清单和检索词都可以修改；下步先联网搜集资料，再写读者成稿。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "outline"}><RefreshCw size={15} className={busy === "outline" ? "spin" : ""} /> 重做研究提纲</button></div>
+      <div className="topic-intro"><div><h2>先定这篇文章怎么走，再决定查什么</h2><p>只保留一个核心追问；研究任务可以不对称，也不必覆盖所有背景。</p></div><button className="button ghost" onClick={onRegenerate} disabled={busy === "outline"}><RefreshCw size={15} className={busy === "outline" ? "spin" : ""} /> 换一条叙事路线</button></div>
       {blockedReport ? (
         <section className="research-blocker" role="status">
           <CircleAlert size={19} />
@@ -1553,12 +1570,21 @@ function OutlineStage({ snapshot, busy, onHeading, onPurpose, onEvidence, onQuer
           </div>
         </section>
       ) : null}
+      <section className="research-route-panel">
+        <header><span>EDITOR ROUTE</span><strong>本篇研究路线</strong><small>以下内容只指导 AI 取材和组织，不会直接成为标题或正文。</small></header>
+        <div className="research-route-grid">
+          <label><span>唯一核心追问</span><textarea value={plan.centralQuestion} onChange={(event) => onPlan("centralQuestion", event.target.value)} rows={2} placeholder="这篇文章最终只需要回答什么？" /></label>
+          <label><span>读者认知张力</span><textarea value={plan.readerTension} onChange={(event) => onPlan("readerTension", event.target.value)} rows={2} placeholder="读者原本以为什么，材料可能揭示什么？" /></label>
+          <label><span>叙事推进方式</span><textarea value={plan.narrativeRoute} onChange={(event) => onPlan("narrativeRoute", event.target.value)} rows={3} placeholder="从哪个细节进入，沿什么矛盾向前推进？" /></label>
+          <label><span>主动舍弃</span><textarea value={plan.exclusion} onChange={(event) => onPlan("exclusion", event.target.value)} rows={3} placeholder="哪些背景或旁支这篇不展开？" /></label>
+        </div>
+      </section>
       <div className="outline-list">
         {snapshot.outline.map((item, index) => (
           <article className="outline-item" key={item.id}>
             <div className="outline-number">{String(index + 1).padStart(2, "0")}</div>
             <div className="outline-body">
-              <label className="outline-edit-field"><span>研究方向（不会成为正文标题）</span><input className="outline-heading-input" value={item.heading} onChange={(event) => onHeading(index, event.target.value)} aria-label={`第 ${index + 1} 项研究方向`} /></label>
+              <label className="outline-edit-field"><span>材料任务（不会成为正文标题）</span><input className="outline-heading-input" value={item.heading} onChange={(event) => onHeading(index, event.target.value)} aria-label={`第 ${index + 1} 项材料任务`} /></label>
               <label className="outline-edit-field"><span>希望回答的问题</span><textarea value={item.purpose} onChange={(event) => onPurpose(index, event.target.value)} rows={2} aria-label={`第 ${index + 1} 项核心问题`} /></label>
               <div className="outline-field-grid">
                 <label className="outline-edit-field"><span>需要找到的证据（每行一项）</span><textarea value={item.bullets.join("\n")} onChange={(event) => onEvidence(index, event.target.value)} rows={3} aria-label={`第 ${index + 1} 项证据清单`} /></label>

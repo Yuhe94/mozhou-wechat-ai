@@ -67,6 +67,13 @@ export interface OutlineItem {
   searchQueries?: string[];
 }
 
+export interface ResearchPlan {
+  centralQuestion: string;
+  readerTension: string;
+  narrativeRoute: string;
+  exclusion: string;
+}
+
 export interface ResearchSource {
   title: string;
   url: string;
@@ -111,6 +118,7 @@ export interface ArticleSnapshot {
   brief: Brief;
   topics: TopicAngle[];
   selectedTopicId: string | null;
+  researchPlan?: ResearchPlan;
   outline: OutlineItem[];
   researchSources?: ResearchSource[];
   researchReport?: ResearchReport;
@@ -207,6 +215,7 @@ export function createBlankSnapshot(): ArticleSnapshot {
     },
     topics: [],
     selectedTopicId: null,
+    researchPlan: undefined,
     outline: [],
     researchSources: [],
     researchReport: undefined,

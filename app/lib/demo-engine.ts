@@ -3,6 +3,7 @@ import {
   type ArticleSection,
   type Brief,
   type OutlineItem,
+  type ResearchPlan,
   type TopicAngle,
 } from "./product-types";
 
@@ -53,7 +54,7 @@ function buildDemoRewriteDraft(
   const sentences = source.match(/[^。！？!?]+[。！？!?]?/g)?.map((item) => item.trim()).filter(Boolean) ?? [];
   const safeSentences = sentences.length ? sentences : ["参考文章信息不足，请补充完整原文后再进行改写。"];
   const perSection = targetMinimum(brief.length) <= 600 ? 1 : 2;
-  const sectionOutline = outline.length ? outline : buildDemoOutline(angle);
+  const sectionOutline = outline.length ? outline : buildDemoOutline(angle, brief);
   const sections = sectionOutline.slice(0, 4).map((item, sectionIndex) => {
     const selected = Array.from({ length: perSection }, (_, itemIndex) =>
       safeSentences[(sectionIndex * perSection + itemIndex) % safeSentences.length],
@@ -105,35 +106,41 @@ export function buildDemoTopics(brief: Brief): TopicAngle[] {
   ];
 }
 
-export function buildDemoOutline(angle: TopicAngle): OutlineItem[] {
+export function buildDemoResearchPlan(brief: Brief, angle: TopicAngle): ResearchPlan {
+  const topic = referenceTopic(brief);
+  return {
+    centralQuestion: `围绕「${topic}」，哪一处事实最可能改变读者现在的判断？`,
+    readerTension: angle.thesis,
+    narrativeRoute: brief.creationMode === "hotspot"
+      ? "从热搜里最具体的一句话或一个动作进入，追到原始上下文，再用相互冲突的材料推动判断。"
+      : "从一个可感知的细节进入，只补会改变结论的背景，让核心矛盾自然浮现。",
+    exclusion: "不做百科式背景罗列，不平均照顾所有分支，不写万能建议。",
+  };
+}
+
+export function buildDemoOutline(angle: TopicAngle, brief?: Brief): OutlineItem[] {
+  const topic = brief ? referenceTopic(brief) : angle.title;
   return [
     {
       id: "outline-1",
-      heading: "把消息放回它原本的时间线",
-      purpose: `为“${angle.title}”建立可靠的事实起点。`,
-      bullets: ["交代主题背景", "梳理关键节点", "标注仍待核实的信息"],
-      searchQueries: [`${angle.title} 官方信息 时间线`, `${angle.title} official timeline`],
+      heading: `找到「${topic}」最值得作为开场的具体材料`,
+      purpose: "拿到一句原话、一个动作或一组数据，让读者立刻进入事件，而不是先听背景介绍。",
+      bullets: ["最接近现场或原始发布的材料", "能够独立核验其时间和身份的信息"],
+      searchQueries: [`${topic} 原话 现场`, `${topic} 官方 发布`],
     },
     {
       id: "outline-2",
-      heading: "热度之外，变化究竟发生在哪里",
-      purpose: "从表面热度进入原因、矛盾和关键判断。",
-      bullets: ["区分事实与观点", "分析主要原因", "说明核心争议"],
-      searchQueries: [`${angle.title} 争议 原因`, `${angle.title} analysis`],
+      heading: `追清“${angle.title}”里真正冲突的两种说法`,
+      purpose: "确认分歧来自事实不同、立场不同，还是同一句话被截取了不同部分。",
+      bullets: ["两种观点各自引用的依据", "被忽略的上下文", "会改变结论的反例"],
+      searchQueries: [`${topic} 争议 原文`, `${topic} 不同观点`],
     },
     {
       id: "outline-3",
-      heading: "谁会先感受到变化",
-      purpose: "把抽象讨论转化为读者能够理解的具体影响。",
-      bullets: ["识别受影响群体", "区分短期与长期", "避免过度推断"],
-      searchQueries: [`${angle.title} 影响 数据`, `${angle.title} impact data`],
-    },
-    {
-      id: "outline-4",
-      heading: "接下来要等的，是更具体的信号",
-      purpose: "用可执行、不过度承诺的建议收束全文。",
-      bullets: ["关注可靠来源", "列出观察信号", "说明不确定性", "给出下一步建议"],
-      searchQueries: [`${angle.title} 最新进展`, `${angle.title} latest update`],
+      heading: "只补一段会改变理解的背景",
+      purpose: "从已有材料中判断读者缺哪一块背景；如果不影响核心判断，就不写。",
+      bullets: ["与核心矛盾直接相关的制度、关系或前情"],
+      searchQueries: [`${topic} 背景 关键节点`],
     },
   ];
 }
