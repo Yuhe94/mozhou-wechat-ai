@@ -207,7 +207,15 @@ export function parseToutiaoSearchResults(html: string, topic: string): Research
       const rawUrl = typeof record.url === "string" ? record.url : "";
       const url = resolvedToutiaoArticleUrl(rawUrl);
       if (!title || !url || /\/search(?:\?|$)/.test(url)) return [];
-      return [{ title, url, region: "cn" as const, retrieval: "snippet" as const }];
+      const summaryValue = [record.abstract, record.summary, record.description, record.content]
+        .find((value): value is string => typeof value === "string" && cleanText(value).length >= 40);
+      return [{
+        title,
+        url,
+        text: summaryValue ? cleanText(summaryValue).slice(0, 1200) : undefined,
+        region: "cn" as const,
+        retrieval: "snippet" as const,
+      }];
     } catch {
       return [];
     }
@@ -222,6 +230,7 @@ export function parseToutiaoSearchResults(html: string, topic: string): Research
       region: "cn" as const,
       retrieval: "snippet" as const,
     },
+    text: article.text,
   }));
 }
 
@@ -552,7 +561,7 @@ export async function discoverResearchSources(
     return [] as ResearchSeed[];
   });
   const wechatPromise = wechatSeeds(brief.topic).then((seeds) => {
-    if (seeds.length) warnings.push("公众号搜索结果当前提供公开摘要；能读取正文的文章才会计入成稿门禁");
+    if (seeds.length) warnings.push("公众号搜索结果当前提供公开摘要；系统只会结合其他独立来源交叉使用，不会把单条摘要当成完整事实");
     return seeds;
   }).catch((error) => {
     warnings.push(error instanceof Error ? error.message : "公众号文章检索暂时不可用");

@@ -171,6 +171,39 @@ test("creates an editable narrative route with a non-fixed research task count",
   }
 });
 
+test("accepts independent evidence instead of requiring a hotspot-platform channel label", async () => {
+  const { createServer } = await import("vite");
+  const vite = await createServer({
+    configFile: false,
+    root: new URL("../", import.meta.url).pathname,
+    logLevel: "silent",
+    server: { middlewareMode: true },
+  });
+  try {
+    const { assessResearchEvidence } = await vite.ssrLoadModule("/app/lib/research-evidence.ts");
+    const source = (title, url, domain, retrieval, text, channel = "brave") => ({
+      source: { title, url, domain, query: "雷军 宇树机器人", channel, region: "cn", retrieval },
+      text,
+    });
+    const fulltext = assessResearchEvidence([
+      source("雷军到访宇树科技", "https://a.example/1", "a.example", "fulltext", "雷军到访宇树科技并参观机器人演示。".repeat(14)),
+      source("宇树回应雷军来访", "https://b.example/2", "b.example", "fulltext", "双方围绕机器人产品与行业发展进行了交流。".repeat(14)),
+    ], true);
+    assert.equal(fulltext.ready, true);
+    assert.equal(fulltext.evidenceMode, "fulltext");
+
+    const snippets = assessResearchEvidence([
+      source("报道一", "https://one.example/1", "one.example", "snippet", "多家媒体报道雷军到访宇树科技，并观看机器人展示。".repeat(4)),
+      source("报道二", "https://two.example/2", "two.example", "snippet", "公开信息显示雷军参观了宇树科技，现场展示涉及机器人动作。".repeat(4)),
+      source("报道三", "https://three.example/3", "three.example", "snippet", "雷军到访宇树科技的消息引发了机器人行业关注。".repeat(4)),
+    ], true);
+    assert.equal(snippets.ready, true);
+    assert.equal(snippets.evidenceMode, "corroborated-snippets");
+  } finally {
+    await vite.close();
+  }
+});
+
 test("layers a matching mainland official source into research discovery", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
@@ -215,12 +248,12 @@ test("layers a matching mainland official source into research discovery", async
 test("returns to Toutiao search and prioritizes related hotspot articles", async () => {
   const originalFetch = globalThis.fetch;
   const encoded = (value) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  const result = (title, url) => `<article cr-params="${encoded(JSON.stringify({ title, url, cell_type: 67 }))}"></article>`;
+  const result = (title, url, abstract = "") => `<article cr-params="${encoded(JSON.stringify({ title, url, abstract, cell_type: 67 }))}"></article>`;
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url.includes("so.toutiao.com/search")) {
       return new Response([
-        result("Bin赛后回应AL夺冠，原话与争议焦点", "https://article.zlink.toutiao.com/J4dQM?h5_url=https%3A%2F%2Fnews-one.cn%2Fbin-response"),
+        result("Bin赛后回应AL夺冠，原话与争议焦点", "https://article.zlink.toutiao.com/J4dQM?h5_url=https%3A%2F%2Fnews-one.cn%2Fbin-response", "赛后采访中，Bin谈到AL夺冠以及双方在决赛中的表现，也回应了外界关心的备战安排，相关内容随后引发讨论。"),
         result("AL夺冠后Bin回应引发讨论", "https://news-two.cn/al-champion"),
       ].join(""), { headers: { "content-type": "text/html" } });
     }
@@ -245,6 +278,7 @@ test("returns to Toutiao search and prioritizes related hotspot articles", async
     assert.equal(discovery.seeds.length, 2);
     assert.equal(discovery.seeds[0].source.channel, "platform");
     assert.equal(discovery.seeds[0].source.url, "https://news-one.cn/bin-response");
+    assert.match(discovery.seeds[0].text, /赛后采访/);
     assert.deepEqual(discovery.channels, ["热搜平台相关文章"]);
   } finally {
     await vite.close();
@@ -381,6 +415,7 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /discoverResearchSources/);
   assert.match(generator, /researchReport/);
   assert.match(generator, /collectOnlineResearch/);
+  assert.match(generator, /assessResearchEvidence/);
   assert.match(generator, /needsResearch: true/);
   assert.match(generator, /researchMode: "insufficient"/);
   assert.match(generator, /把检索失败和资料不足写进了面向读者的正文/);
@@ -389,6 +424,7 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /outline 为 2–5 项，任务之间不要同构/);
   assert.match(workspace, /联网研究并生成读者成稿/);
   assert.match(workspace, /资料还不够，本次没有生成正文/);
+  assert.match(workspace, /多站点摘要交叉/);
   assert.match(workspace, /先定这篇文章怎么走，再决定查什么/);
   assert.match(workspace, /唯一核心追问/);
   assert.match(workspace, /主动舍弃/);

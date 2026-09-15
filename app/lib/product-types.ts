@@ -90,6 +90,7 @@ export interface ResearchReport {
   channels: string[];
   warnings: string[];
   status?: "ready" | "insufficient";
+  evidenceMode?: "fulltext" | "mixed" | "corroborated-snippets" | "brief-only" | "insufficient";
   missingEvidence?: string[];
 }
 

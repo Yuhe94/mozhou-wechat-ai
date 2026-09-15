@@ -1626,12 +1626,19 @@ function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGe
   };
   const report = snapshot.researchReport;
   const fulltextCount = (snapshot.researchSources ?? []).filter((source) => source.retrieval === "fulltext").length;
+  const evidenceLabels: Record<NonNullable<ResearchReport["evidenceMode"]>, string> = {
+    fulltext: "正文交叉核验",
+    mixed: "正文 + 多源摘要",
+    "corroborated-snippets": "多站点摘要交叉",
+    "brief-only": "仅使用简报材料",
+    insufficient: "材料仍不足",
+  };
   return (
     <div className="stage-content">
       <div className="draft-toolbar"><span><WandSparkles size={15} /> 双轮编辑成稿 · 约 {articleCharacterCount(snapshot)} 字</span><div className="draft-toolbar-actions"><button className="button ghost" onClick={onAddStyle}><Clipboard size={15} /> 将人工定稿收入范例库</button><button className="button ghost" onClick={onRegenerate} disabled={busy === "draft"}><RefreshCw size={15} className={busy === "draft" ? "spin" : ""} /> 重新编辑成稿</button></div></div>
       {(Boolean(snapshot.researchSources?.length) || Boolean(report)) && (
         <section className="research-source-panel">
-          <div className="research-source-heading"><div><strong>联网研究记录</strong><span>取得 {snapshot.researchSources?.length ?? 0} 个来源，其中 {fulltextCount} 个已读取正文；发布前仍需人工核对。</span></div>{report ? <span className="research-region-chip">重点地区：{reportRegionLabels[report.region]}</span> : null}</div>
+          <div className="research-source-heading"><div><strong>联网研究记录</strong><span>取得 {snapshot.researchSources?.length ?? 0} 个来源，其中 {fulltextCount} 个已读取正文；{report?.evidenceMode ? `证据方式：${evidenceLabels[report.evidenceMode]}；` : ""}发布前仍需人工核对。</span></div>{report ? <span className="research-region-chip">重点地区：{reportRegionLabels[report.region]}</span> : null}</div>
           {report?.channels.length ? <div className="research-channel-summary"><span>本次已使用</span>{report.channels.map((channel) => <b key={channel}>{channel}</b>)}</div> : null}
           {report?.warnings.length ? <ul className="research-warnings">{report.warnings.map((warning) => <li key={warning}><CircleAlert size={12} />{warning}</li>)}</ul> : null}
           <div className="research-source-links">
