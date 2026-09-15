@@ -157,9 +157,9 @@ async function collectOnlineResearch(
   ])];
   const evidence = assessResearchEvidence(materials, brief.creationMode === "hotspot");
   const evidenceWarnings = evidence.evidenceMode === "corroborated-snippets"
-    ? ["本次未能稳定读取文章正文，已采用多站点摘要交叉成稿；不会生成摘要中没有的原话、数字或细节"]
+    ? ["本次未能稳定读取文章正文，已采用多来源摘要交叉成稿；不会生成摘要中没有的原话、数字或细节"]
     : evidence.evidenceMode === "mixed"
-      ? ["本次同时使用正文与多站点摘要；摘要只用于补充多来源共同出现的信息"]
+      ? ["本次同时使用正文与多来源摘要；摘要只用于补充多个独立发布者共同出现的信息"]
       : [];
   const report: ResearchReport = {
     region: discovery.region,

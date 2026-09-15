@@ -1628,8 +1628,8 @@ function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGe
   const fulltextCount = (snapshot.researchSources ?? []).filter((source) => source.retrieval === "fulltext").length;
   const evidenceLabels: Record<NonNullable<ResearchReport["evidenceMode"]>, string> = {
     fulltext: "正文交叉核验",
-    mixed: "正文 + 多源摘要",
-    "corroborated-snippets": "多站点摘要交叉",
+    mixed: "正文 + 多来源摘要",
+    "corroborated-snippets": "多来源摘要交叉",
     "brief-only": "仅使用简报材料",
     insufficient: "材料仍不足",
   };

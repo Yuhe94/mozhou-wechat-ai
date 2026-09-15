@@ -11,7 +11,7 @@ export type EvidenceAssessment = {
   missingEvidence: string[];
   fulltextCount: number;
   snippetCount: number;
-  independentDomainCount: number;
+  independentSourceCount: number;
 };
 
 function compactLength(value: string) {
@@ -20,6 +20,15 @@ function compactLength(value: string) {
 
 function sourceKey(material: ResearchMaterial) {
   return material.source.url || `${material.source.domain}:${material.source.title}`;
+}
+
+function publisherKey(material: ResearchMaterial) {
+  if (material.source.channel === "wechat" && material.source.domain === "weixin.sogou.com") {
+    const parts = material.source.title.split("｜").map((part) => part.trim()).filter(Boolean);
+    const account = parts.length > 1 ? parts.at(-1) : "";
+    if (account) return `wechat:${account}`;
+  }
+  return material.source.domain.toLowerCase();
 }
 
 export function assessResearchEvidence(materials: ResearchMaterial[], isHotspot: boolean): EvidenceAssessment {
@@ -34,8 +43,8 @@ export function assessResearchEvidence(materials: ResearchMaterial[], isHotspot:
   ));
   const fulltextCharacters = fulltext.reduce((total, material) => total + compactLength(material.text), 0);
   const snippetCharacters = snippets.reduce((total, material) => total + compactLength(material.text), 0);
-  const independentDomains = new Set(
-    [...fulltext, ...snippets].map((material) => material.source.domain.toLowerCase()).filter(Boolean),
+  const independentSources = new Set(
+    [...fulltext, ...snippets].map(publisherKey).filter(Boolean),
   );
   const detailedUserMaterial = fulltext.some((material) => (
     material.source.channel === "user" && compactLength(material.text) >= 500
@@ -43,10 +52,10 @@ export function assessResearchEvidence(materials: ResearchMaterial[], isHotspot:
   const fulltextReady = (fulltext.length >= 2 && fulltextCharacters >= 500) || detailedUserMaterial;
   const mixedReady = fulltext.length >= 1
     && snippets.length >= 2
-    && independentDomains.size >= 2
+    && independentSources.size >= 2
     && fulltextCharacters + snippetCharacters >= 450;
   const snippetsReady = snippets.length >= 3
-    && independentDomains.size >= 2
+    && independentSources.size >= 2
     && snippetCharacters >= 240;
 
   if (!isHotspot) {
@@ -56,7 +65,7 @@ export function assessResearchEvidence(materials: ResearchMaterial[], isHotspot:
       missingEvidence: [],
       fulltextCount: fulltext.length,
       snippetCount: snippets.length,
-      independentDomainCount: independentDomains.size,
+      independentSourceCount: independentSources.size,
     };
   }
 
@@ -69,7 +78,7 @@ export function assessResearchEvidence(materials: ResearchMaterial[], isHotspot:
         : "insufficient";
   const ready = evidenceMode !== "insufficient";
   const missingEvidence = ready ? [] : [
-    "至少取得 2 篇可读取正文，或 3 条来自至少 2 个独立站点的相关摘要",
+    "至少取得 2 篇可读取正文，或 3 条来自至少 2 个独立发布者或站点的相关摘要",
     fulltextCharacters + snippetCharacters < 240 ? "现有材料的信息量还不足以支撑成稿" : "现有材料缺少可交叉核对的独立来源",
   ];
 
@@ -79,6 +88,6 @@ export function assessResearchEvidence(materials: ResearchMaterial[], isHotspot:
     missingEvidence,
     fulltextCount: fulltext.length,
     snippetCount: snippets.length,
-    independentDomainCount: independentDomains.size,
+    independentSourceCount: independentSources.size,
   };
 }

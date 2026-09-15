@@ -199,6 +199,15 @@ test("accepts independent evidence instead of requiring a hotspot-platform chann
     ], true);
     assert.equal(snippets.ready, true);
     assert.equal(snippets.evidenceMode, "corroborated-snippets");
+
+    const wechatAccounts = assessResearchEvidence([
+      source("法国队轮换观察｜体育花简", "https://weixin.sogou.com/link?a", "weixin.sogou.com", "snippet", "法国队公布轮换安排，姆巴佩和登贝莱的角色再次成为讨论焦点。".repeat(4), "wechat"),
+      source("姆巴佩与登贝莱谁是核心｜K唐伯虎", "https://weixin.sogou.com/link?b", "weixin.sogou.com", "snippet", "围绕法国队进攻核心的讨论同时涉及姆巴佩和登贝莱近期表现。".repeat(4), "wechat"),
+      source("金球奖评选中的队友竞争｜足球达人堂", "https://weixin.sogou.com/link?c", "weixin.sogou.com", "snippet", "多篇评论从金球奖评选机制分析两名法国队球员的竞争关系。".repeat(4), "wechat"),
+    ], true);
+    assert.equal(wechatAccounts.ready, true);
+    assert.equal(wechatAccounts.evidenceMode, "corroborated-snippets");
+    assert.equal(wechatAccounts.independentSourceCount, 3);
   } finally {
     await vite.close();
   }
@@ -424,7 +433,7 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /outline 为 2–5 项，任务之间不要同构/);
   assert.match(workspace, /联网研究并生成读者成稿/);
   assert.match(workspace, /资料还不够，本次没有生成正文/);
-  assert.match(workspace, /多站点摘要交叉/);
+  assert.match(workspace, /多来源摘要交叉/);
   assert.match(workspace, /先定这篇文章怎么走，再决定查什么/);
   assert.match(workspace, /唯一核心追问/);
   assert.match(workspace, /主动舍弃/);
