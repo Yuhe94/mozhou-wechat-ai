@@ -169,20 +169,23 @@ test("hard-normalizes short articles and removes duplicate image slots", async (
   try {
     const { normalizeReaderDraft } = await vite.ssrLoadModule("/app/lib/article-draft.ts");
     const draft = normalizeReaderDraft({
-      title: "塔克拉玛干发现了大型地下水水源？先等等",
-      digest: "一条简讯",
+      title: "「塔克拉玛干」发现了大型地下水水源？先等等",
+      digest: "一条『简讯』",
       sections: [
-        { id: "a", heading: "第一部分", paragraphs: ["第一段说明消息来源。", "配图：塔克拉玛干沙漠"], imageSlot: "IMG-01" },
+        { id: "a", heading: "第一部分", paragraphs: ["第一段说明「消息来源」。", "配图：塔克拉玛干沙漠"], imageSlot: "IMG-01" },
         { id: "b", heading: "第二部分", paragraphs: ["第二段补充已有背景。"], imageSlot: "IMG-01" },
         { id: "c", heading: "第三部分", paragraphs: ["第三段给出有限判断。"], imageSlot: "IMG-02" },
       ],
     }, "400–600 字");
-    assert.equal(draft.title, "塔克拉玛干发现了大型地下水水源？");
+    assert.equal(draft.title, "“塔克拉玛干”发现了大型地下水水源？");
+    assert.equal(draft.digest, "一条“简讯”");
     assert.equal(draft.sections.length, 2);
     assert.ok(draft.sections.every((section) => section.heading === ""));
     assert.equal(draft.sections.flatMap((section) => section.paragraphs).length, 2);
     assert.deepEqual(draft.sections.flatMap((section) => section.imageSlot ? [section.imageSlot] : []), ["IMG-01"]);
     assert.doesNotMatch(JSON.stringify(draft), /配图：/);
+    assert.doesNotMatch(JSON.stringify(draft), /[「」『』]/);
+    assert.match(JSON.stringify(draft), /“消息来源”/);
     assert.match(JSON.stringify(draft), /第三段给出有限判断/);
   } finally {
     await vite.close();
@@ -411,6 +414,10 @@ test("ships the required creation, rewriting, hotspot, storage, and export surfa
   assert.match(workspace, /联网新闻研究/);
   assert.match(workspace, /Brave News \+ 区域官方源/);
   assert.match(workspace, /联网研究记录/);
+  assert.match(workspace, /增加材料任务/);
+  assert.match(workspace, /删除第 \$\{index \+ 1\} 项材料任务/);
+  assert.match(workspace, /增加正文模块/);
+  assert.match(workspace, /删除第 \$\{index \+ 1\} 个正文模块/);
   assert.match(generator, /generateCompatibleText/);
   assert.match(generator, /generateCompatibleImage/);
   assert.match(generator, /参考原文改写/);

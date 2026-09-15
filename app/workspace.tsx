@@ -30,6 +30,7 @@ import {
   RefreshCw,
   Settings2,
   Sparkles,
+  Trash2,
   Upload,
   WandSparkles,
   X,
@@ -176,6 +177,10 @@ function getStepMax(snapshot: ArticleSnapshot) {
   if (snapshot.outline.length) return 3;
   if (snapshot.topics.length) return 2;
   return 1;
+}
+
+function editableModuleId(prefix: "research" | "section") {
+  return `${prefix}-${globalThis.crypto.randomUUID()}`;
 }
 
 function fileToBlob(dataUrl: string) {
@@ -1100,6 +1105,27 @@ export default function Workspace({ displayName }: { displayName: string }) {
                 }))
               }
               onMove={moveOutline}
+              onAdd={() =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  outline: [
+                    ...current.outline,
+                    {
+                      id: editableModuleId("research"),
+                      heading: "",
+                      purpose: "",
+                      bullets: [],
+                      searchQueries: [],
+                    },
+                  ],
+                }))
+              }
+              onRemove={(index) =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  outline: current.outline.filter((_, itemIndex) => itemIndex !== index),
+                }))
+              }
               onBack={() => setStep("topics")}
               onGenerate={generateDraft}
               onRegenerate={generateOutline}
@@ -1122,6 +1148,27 @@ export default function Workspace({ displayName }: { displayName: string }) {
                       : section,
                   ),
                 }))
+              }
+              onAddSection={() =>
+                updateSnapshot((current) => ({
+                  ...current,
+                  sections: [
+                    ...current.sections,
+                    { id: editableModuleId("section"), heading: "", paragraphs: [""] },
+                  ],
+                }))
+              }
+              onRemoveSection={(index) =>
+                updateSnapshot((current) => {
+                  const removedSlot = current.sections[index]?.imageSlot;
+                  return {
+                    ...current,
+                    sections: current.sections.filter((_, sectionIndex) => sectionIndex !== index),
+                    images: removedSlot
+                      ? current.images.filter((image) => image.slot !== removedSlot)
+                      : current.images,
+                  };
+                })
               }
               onBack={() => setStep("outline")}
               onGenerateImages={generateImages}
@@ -1607,8 +1654,8 @@ function TopicsStage({ snapshot, busy, onSelect, onBack, onGenerate, onRegenerat
   );
 }
 
-function OutlineStage({ snapshot, busy, onPlan, onHeading, onPurpose, onEvidence, onQueries, onMove, onBack, onGenerate, onRegenerate }: {
-  snapshot: ArticleSnapshot; busy: string | null; onPlan: (field: keyof ResearchPlan, value: string) => void; onHeading: (index: number, value: string) => void; onPurpose: (index: number, value: string) => void; onEvidence: (index: number, value: string) => void; onQueries: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
+function OutlineStage({ snapshot, busy, onPlan, onHeading, onPurpose, onEvidence, onQueries, onMove, onAdd, onRemove, onBack, onGenerate, onRegenerate }: {
+  snapshot: ArticleSnapshot; busy: string | null; onPlan: (field: keyof ResearchPlan, value: string) => void; onHeading: (index: number, value: string) => void; onPurpose: (index: number, value: string) => void; onEvidence: (index: number, value: string) => void; onQueries: (index: number, value: string) => void; onMove: (index: number, direction: -1 | 1) => void; onAdd: () => void; onRemove: (index: number) => void; onBack: () => void; onGenerate: () => void; onRegenerate: () => void;
 }) {
   const blockedReport = snapshot.researchReport?.status === "insufficient" ? snapshot.researchReport : null;
   const plan = snapshot.researchPlan ?? { centralQuestion: "", readerTension: "", narrativeRoute: "", exclusion: "" };
@@ -1648,17 +1695,19 @@ function OutlineStage({ snapshot, busy, onPlan, onHeading, onPurpose, onEvidence
                 <label className="outline-edit-field"><span>联网检索词（每行一条）</span><textarea value={(item.searchQueries ?? []).join("\n")} onChange={(event) => onQueries(index, event.target.value)} rows={3} aria-label={`第 ${index + 1} 项检索词`} /></label>
               </div>
             </div>
-            <div className="outline-actions"><button onClick={() => onMove(index, -1)} disabled={index === 0} aria-label="上移"><ArrowUp size={15} /></button><button onClick={() => onMove(index, 1)} disabled={index === snapshot.outline.length - 1} aria-label="下移"><ArrowDown size={15} /></button></div>
+            <div className="outline-actions"><button onClick={() => onMove(index, -1)} disabled={index === 0} aria-label="上移"><ArrowUp size={15} /></button><button onClick={() => onMove(index, 1)} disabled={index === snapshot.outline.length - 1} aria-label="下移"><ArrowDown size={15} /></button><button className="delete-module-button" onClick={() => onRemove(index)} aria-label={`删除第 ${index + 1} 项材料任务`} title="删除模块"><Trash2 size={14} /></button></div>
           </article>
         ))}
+        {!snapshot.outline.length ? <p className="empty-module-note">当前没有材料任务，可以手动增加一个。</p> : null}
+        <button className="button ghost module-add-button" onClick={onAdd}><Plus size={16} /> 增加材料任务</button>
       </div>
-      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究角度</button><button className="button primary large" onClick={onGenerate} disabled={busy === "draft"}>{busy === "draft" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />} {blockedReport ? "按修改后的检索词重试" : "联网研究并生成读者成稿"} <ArrowRight size={17} /></button></div>
+      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究角度</button><button className="button primary large" onClick={onGenerate} disabled={busy === "draft" || !snapshot.outline.length}>{busy === "draft" ? <LoaderCircle size={18} className="spin" /> : <FileText size={18} />} {blockedReport ? "按修改后的检索词重试" : "联网研究并生成读者成稿"} <ArrowRight size={17} /></button></div>
     </div>
   );
 }
 
-function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGenerateImages, onRegenerate, onAddStyle }: {
-  snapshot: ArticleSnapshot; busy: string | null; onTitle: (value: string) => void; onDigest: (value: string) => void; onSection: (index: number, field: "heading" | "paragraphs", value: string) => void; onBack: () => void; onGenerateImages: () => void; onRegenerate: () => void; onAddStyle: () => void;
+function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onAddSection, onRemoveSection, onBack, onGenerateImages, onRegenerate, onAddStyle }: {
+  snapshot: ArticleSnapshot; busy: string | null; onTitle: (value: string) => void; onDigest: (value: string) => void; onSection: (index: number, field: "heading" | "paragraphs", value: string) => void; onAddSection: () => void; onRemoveSection: (index: number) => void; onBack: () => void; onGenerateImages: () => void; onRegenerate: () => void; onAddStyle: () => void;
 }) {
   const channelLabels: Record<NonNullable<ResearchSource["channel"]>, string> = {
     user: "用户资料",
@@ -1713,13 +1762,15 @@ function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGe
         <textarea className="digest-input" value={snapshot.digest} onChange={(event) => onDigest(event.target.value)} rows={3} aria-label="文章摘要" />
         {snapshot.sections.map((section, index) => (
           <div className="section-editor" key={section.id}>
-            <div className="section-meta"><span>SECTION {String(index + 1).padStart(2, "0")}</span>{section.imageSlot && <span className="slot-chip"><ImageIcon size={13} /> {section.imageSlot}</span>}</div>
+            <div className="section-meta"><span>SECTION {String(index + 1).padStart(2, "0")}</span><div className="section-meta-actions">{section.imageSlot && <span className="slot-chip"><ImageIcon size={13} /> {section.imageSlot}</span>}<button className="section-delete-button" onClick={() => onRemoveSection(index)} aria-label={`删除第 ${index + 1} 个正文模块`} title="删除模块"><Trash2 size={14} /></button></div></div>
             <input className="section-heading-input" value={section.heading} onChange={(event) => onSection(index, "heading", event.target.value)} aria-label={`第 ${index + 1} 节标题`} placeholder="简单文章可留空，不显示小标题" />
             <textarea value={section.paragraphs.join("\n\n")} onChange={(event) => onSection(index, "paragraphs", event.target.value)} rows={Math.max(6, section.paragraphs.join("\n").length / 42)} aria-label={`第 ${index + 1} 节正文`} />
           </div>
         ))}
+        {!snapshot.sections.length ? <p className="empty-module-note">当前没有正文模块，可以手动增加一个。</p> : null}
+        <button className="button ghost module-add-button" onClick={onAddSection}><Plus size={16} /> 增加正文模块</button>
       </section>
-      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究提纲</button><button className="button primary large" onClick={onGenerateImages} disabled={busy === "images"}>{busy === "images" ? <LoaderCircle size={18} className="spin" /> : <ImageIcon size={18} />} 生成封面与正文配图 <ArrowRight size={17} /></button></div>
+      <div className="stage-footer between"><button className="button ghost" onClick={onBack}><ArrowLeft size={17} /> 返回研究提纲</button><button className="button primary large" onClick={onGenerateImages} disabled={busy === "images" || !snapshot.sections.length}>{busy === "images" ? <LoaderCircle size={18} className="spin" /> : <ImageIcon size={18} />} 生成封面与正文配图 <ArrowRight size={17} /></button></div>
     </div>
   );
 }

@@ -17,6 +17,12 @@ function requestedMaximum(length: string) {
   return values.length ? values.at(-1)! : 600;
 }
 
+function normalizeReaderPunctuation(value: string) {
+  return value
+    .replace(/[「『]/g, "“")
+    .replace(/[」』]/g, "”");
+}
+
 export function isShortArticleLength(length: string) {
   return requestedMaximum(length) <= 600;
 }
@@ -25,7 +31,7 @@ function paragraphValues(section: DraftSectionRecord) {
   if (!Array.isArray(section.paragraphs)) return [];
   return section.paragraphs
     .filter((value): value is string => typeof value === "string")
-    .map((value) => value.trim())
+    .map((value) => normalizeReaderPunctuation(value.trim()))
     .filter((value) => value.length > 0 && !STANDALONE_IMAGE_MARKER.test(value));
 }
 
@@ -50,7 +56,7 @@ function mergeParagraphs(paragraphs: string[], maximum: number) {
 
 function normalizeTitle(value: unknown) {
   if (typeof value !== "string") return value;
-  return value.trim().replace(CAUTION_SUFFIX, "$1");
+  return normalizeReaderPunctuation(value.trim()).replace(CAUTION_SUFFIX, "$1");
 }
 
 export function looksLikeInternalWorkingDraft(draft: unknown) {
@@ -78,7 +84,7 @@ export function normalizeReaderDraft<T extends Record<string, unknown>>(draft: T
     .map((section, index) => ({
       ...section,
       id: typeof section.id === "string" && section.id.trim() ? section.id : `section-${index + 1}`,
-      heading: typeof section.heading === "string" ? section.heading.trim() : "",
+      heading: typeof section.heading === "string" ? normalizeReaderPunctuation(section.heading.trim()) : "",
       paragraphs: paragraphValues(section),
     }))
     .filter((section) => section.paragraphs.length > 0)
@@ -90,6 +96,7 @@ export function normalizeReaderDraft<T extends Record<string, unknown>>(draft: T
     return {
       ...draft,
       title: normalizeTitle(draft.title),
+      digest: typeof draft.digest === "string" ? normalizeReaderPunctuation(draft.digest.trim()) : draft.digest,
       sections: paragraphs.map((paragraph, index) => ({
         id: `section-${index + 1}`,
         heading: "",
@@ -103,6 +110,7 @@ export function normalizeReaderDraft<T extends Record<string, unknown>>(draft: T
   return {
     ...draft,
     title: normalizeTitle(draft.title),
+    digest: typeof draft.digest === "string" ? normalizeReaderPunctuation(draft.digest.trim()) : draft.digest,
     sections: sections.map((section) => {
       const hasImage = typeof section.imageSlot === "string" && section.imageSlot.trim() && nextImageNumber <= 2;
       const imageSlot = hasImage ? `IMG-${String(nextImageNumber++).padStart(2, "0")}` : undefined;
