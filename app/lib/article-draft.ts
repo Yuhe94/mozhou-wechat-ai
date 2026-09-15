@@ -2,6 +2,15 @@ type DraftSectionRecord = Record<string, unknown>;
 
 const STANDALONE_IMAGE_MARKER = /^(?:IMG-\d+|(?:配图|插图)\s*[：:]\s*.+)$/i;
 const CAUTION_SUFFIX = /([？?!！])\s*(?:先等等|先别急|别急)(?:再说|再看|一下)?[。.!！]?$/;
+const INTERNAL_WORKING_MARKERS = [
+  /内部核查/,
+  /热搜词条与转载来源的基本事实/,
+  /核心追问[：:]/,
+  /待核与不宜采用的信息/,
+  /供终审编辑重组/,
+  /待核[一二三四五六\d][：:]/,
+  /本轮可核查/,
+];
 
 function requestedMaximum(length: string) {
   const values = [...length.matchAll(/\d+/g)].map((match) => Number.parseInt(match[0], 10));
@@ -42,6 +51,23 @@ function mergeParagraphs(paragraphs: string[], maximum: number) {
 function normalizeTitle(value: unknown) {
   if (typeof value !== "string") return value;
   return value.trim().replace(CAUTION_SUFFIX, "$1");
+}
+
+export function looksLikeInternalWorkingDraft(draft: unknown) {
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) return false;
+  const record = draft as Record<string, unknown>;
+  const sections = Array.isArray(record.sections)
+    ? record.sections.filter((section): section is DraftSectionRecord => Boolean(section) && typeof section === "object" && !Array.isArray(section))
+    : [];
+  const fullText = [
+    typeof record.title === "string" ? record.title : "",
+    typeof record.digest === "string" ? record.digest : "",
+    ...sections.flatMap((section) => [
+      typeof section.heading === "string" ? section.heading : "",
+      ...paragraphValues(section),
+    ]),
+  ].join("\n");
+  return INTERNAL_WORKING_MARKERS.filter((pattern) => pattern.test(fullText)).length >= 2;
 }
 
 export function normalizeReaderDraft<T extends Record<string, unknown>>(draft: T, requestedLength: string): T {

@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createEditorialImage } from "./lib/image-canvas.client";
+import { looksLikeInternalWorkingDraft } from "./lib/article-draft";
 import {
   DEFAULT_AI_SETTINGS,
   generationHeaders,
@@ -218,12 +219,12 @@ function resetGeneratedContent(
   };
 }
 
-function withoutLegacyDemoDraft(snapshot: ArticleSnapshot): ArticleSnapshot {
+function withoutNonPublishableDraft(snapshot: ArticleSnapshot): ArticleSnapshot {
   const placeholder = snapshot.generationMode === "demo" && (
     /正式动笔前，还需要补齐这些事实/.test(snapshot.title)
     || /按照背景、核心问题、现实影响和后续判断四个层次/.test(snapshot.digest)
   );
-  if (!placeholder) return snapshot;
+  if (!placeholder && !looksLikeInternalWorkingDraft(snapshot)) return snapshot;
   return {
     ...snapshot,
     title: "",
@@ -286,7 +287,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
         setArticles(data.articles);
         if (data.articles[0]) {
           setArticleId(data.articles[0].id);
-          setSnapshot(withoutLegacyDemoDraft(data.articles[0].snapshot));
+          setSnapshot(withoutNonPublishableDraft(data.articles[0].snapshot));
         } else {
           const initial = { ...createBlankSnapshot(), updatedAt: new Date().toISOString() };
           const created = await fetch("/api/articles", {
@@ -741,14 +742,14 @@ export default function Workspace({ displayName }: { displayName: string }) {
       if (error instanceof GenerationRequestError) {
         if (error.payload.researchSources?.length || error.payload.researchReport) {
           updateSnapshot((current) => ({
-            ...withoutLegacyDemoDraft(current),
+            ...withoutNonPublishableDraft(current),
             researchSources: error.payload.researchSources ?? current.researchSources,
             researchReport: error.payload.researchReport ?? current.researchReport,
             step: "outline",
           }));
         }
         if (error.payload.code === "AI_KEY_REQUIRED") {
-          updateSnapshot((current) => withoutLegacyDemoDraft(current));
+          updateSnapshot((current) => withoutNonPublishableDraft(current));
           setSettingsDraft(aiSettings);
           setProviderTest({ status: "idle", text: "" });
           setSettingsOpen(true);
@@ -859,7 +860,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
 
   const openArticle = (article: StoredArticle) => {
     setArticleId(article.id);
-    setSnapshot(withoutLegacyDemoDraft(article.snapshot));
+    setSnapshot(withoutNonPublishableDraft(article.snapshot));
     setMobileNav(false);
   };
 

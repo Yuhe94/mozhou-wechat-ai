@@ -4,7 +4,7 @@ import {
   imageProviderConfig,
   textProviderConfig,
 } from "../../lib/ai-provider.server";
-import { isShortArticleLength, normalizeReaderDraft } from "../../lib/article-draft";
+import { isShortArticleLength, looksLikeInternalWorkingDraft, normalizeReaderDraft } from "../../lib/article-draft";
 import { buildDemoOutline, buildDemoResearchPlan, buildDemoTopics } from "../../lib/demo-engine";
 import { discoverResearchSources, researchPreferences } from "../../lib/news-research.server";
 import { assessResearchEvidence } from "../../lib/research-evidence";
@@ -208,6 +208,7 @@ function readerDraftIssues(draft: Record<string, unknown>, internalAngle = "", r
   if (/目前唯一可以确认|能确认的只有词条|只有词条存在|原话.{0,12}(?:查不到|没有可靠来源)/.test(fullText)) {
     issues.push("把检索失败和资料不足写进了面向读者的正文");
   }
+  if (looksLikeInternalWorkingDraft(draft)) issues.push("把内部研究工作稿当成了读者成稿");
   if (paragraphs.length < 1) issues.push("正文没有有效段落");
   if (requestedMinimum > 600 && paragraphs.length < 3) issues.push("长文段落过少，论述尚未展开");
   return issues;
@@ -435,15 +436,29 @@ export async function POST(request: Request) {
     const workingDraft = objectField<Record<string, unknown>>(workingParsed, "draft") ?? workingParsed;
 
     try {
-      const finalOutput = await generateCompatibleText(
-        config,
-        `${FINAL_EDIT_SYSTEM}\n${modeInstructions(generationBrief)}\n${styleInstructions(body.styleContext)}`,
-        `创作主题：${generationBrief.topic}\n目标读者：${generationBrief.audience}\n文章目的：${generationBrief.goal}\n期望语气：${generationBrief.tone}\n预计篇幅：${generationBrief.length}\n用户行动：${generationBrief.callToAction}\n内部研究角度：${JSON.stringify(body.angle)}\n作者确定的核心追问与叙事路线：${JSON.stringify(body.researchPlan ?? {})}\n\n注意：研究角度和研究任务只是内部方向，绝不能直接复制为文章标题或章节。执行叙事路线，但不要在正文里解释路线；允许一个关键材料占据主要篇幅，其他材料只在必要时出现。以下是作者工作稿，只把它当作事实与观点素材，不沿用它的标题、章节名、段落顺序和模板表达：\n${JSON.stringify(workingDraft)}\n\n请完成终审重写。若预计篇幅为 400–600 字，必须只输出 1–2 个 section、每个 section 只有一个完整自然段、heading 必须为空；篇幅更长时，只有复杂文章才使用 2–4 个自然小标题。资料较薄时只写来源明确的简讯，不得以“未找到发布方、论文、探测方法”等检索缺口凑字数。短文如需正文配图，只保留一次 IMG-01；较长文章再按需要使用 IMG-01、IMG-02，不要为了插图拆段。输出 JSON 对象，格式为：{"draft":{"title":"研究完成后重新拟定的自然标题","digest":"80字以内摘要","sections":[{"id":"section-1","heading":"400–600字时必须为空","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。正文总字数符合“${generationBrief.length}”，sections 为 1–4 项。不要输出解释、评分或修改说明。`,
-        7000,
-        true,
-      );
-      const finalParsed = parseStructuredOutput(finalOutput);
-      let draft = objectField<Record<string, unknown>>(finalParsed, "draft") ?? finalParsed;
+      const finalInput = `创作主题：${generationBrief.topic}\n目标读者：${generationBrief.audience}\n文章目的：${generationBrief.goal}\n期望语气：${generationBrief.tone}\n预计篇幅：${generationBrief.length}\n用户行动：${generationBrief.callToAction}\n内部研究角度：${JSON.stringify(body.angle)}\n作者确定的核心追问与叙事路线：${JSON.stringify(body.researchPlan ?? {})}\n\n注意：研究角度和研究任务只是内部方向，绝不能直接复制为文章标题或章节。执行叙事路线，但不要在正文里解释路线；允许一个关键材料占据主要篇幅，其他材料只在必要时出现。以下是作者工作稿，只把它当作事实与观点素材，不沿用它的标题、章节名、段落顺序和模板表达：\n${JSON.stringify(workingDraft)}\n\n请完成终审重写。若预计篇幅为 400–600 字，必须只输出 1–2 个 section、每个 section 只有一个完整自然段、heading 必须为空；篇幅更长时，只有复杂文章才使用 2–4 个自然小标题。资料较薄时只写来源明确的简讯，不得以“未找到发布方、论文、探测方法”等检索缺口凑字数。短文如需正文配图，只保留一次 IMG-01；较长文章再按需要使用 IMG-01、IMG-02，不要为了插图拆段。输出 JSON 对象，格式为：{"draft":{"title":"研究完成后重新拟定的自然标题","digest":"80字以内摘要","sections":[{"id":"section-1","heading":"400–600字时必须为空","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。正文总字数符合“${generationBrief.length}”，sections 为 1–4 项。不要输出解释、评分或修改说明。`;
+      let draft: Record<string, unknown>;
+      try {
+        const finalOutput = await generateCompatibleText(
+          config,
+          `${FINAL_EDIT_SYSTEM}\n${modeInstructions(generationBrief)}\n${styleInstructions(body.styleContext)}`,
+          finalInput,
+          7000,
+          true,
+        );
+        const finalParsed = parseStructuredOutput(finalOutput);
+        draft = objectField<Record<string, unknown>>(finalParsed, "draft") ?? finalParsed as Record<string, unknown>;
+      } catch {
+        const retryOutput = await generateCompatibleText(
+          config,
+          `${FINAL_EDIT_SYSTEM}\n${modeInstructions(generationBrief)}\n这是终审重试：只完成读者成稿，不复述研究过程。`,
+          `创作主题：${generationBrief.topic}\n预计篇幅：${generationBrief.length}\n期望语气：${generationBrief.tone}\n\n将下面的内部工作稿压缩并重写为读者文章。删除“内部核查”“核心追问”“待核”“不宜采用”“供终审编辑重组”等后台语言；资料有限就缩小范围。400–600 字必须无小标题、只有 1–2 个自然段。\n\n内部工作稿：${JSON.stringify(workingDraft)}\n\n只输出 JSON：{"draft":{"title":"自然标题","digest":"80字以内摘要","sections":[{"id":"section-1","heading":"","paragraphs":["读者正文"],"imageSlot":"IMG-01"}]}}。`,
+          5000,
+          true,
+        );
+        const retryParsed = parseStructuredOutput(retryOutput);
+        draft = objectField<Record<string, unknown>>(retryParsed, "draft") ?? retryParsed as Record<string, unknown>;
+      }
       let qualityIssues = readerDraftIssues(draft, body.angle.title, generationBrief.length);
 
       if (qualityIssues.length) {
@@ -461,9 +476,19 @@ export async function POST(request: Request) {
       draft = normalizeReaderDraft(draft, generationBrief.length);
       qualityIssues = readerDraftIssues(draft, body.angle.title, generationBrief.length);
 
+      if (qualityIssues.length) {
+        return json({
+          error: `终审后的文章仍未达到发布标准：${qualityIssues.join("；")}。已保留联网研究资料，请重新编辑成稿。`,
+          code: "AI_FINAL_QUALITY_FAILED",
+          retryable: true,
+          researchSources: research.sources,
+          researchReport: research.report,
+        }, { status: 422 });
+      }
+
       return json({
         mode: "ai",
-        editorPass: qualityIssues.length ? "working-draft" : "final",
+        editorPass: "final",
         researchMode: research.sources.length ? "online" : "brief-only",
         draft,
         researchSources: research.sources,
@@ -471,25 +496,20 @@ export async function POST(request: Request) {
         provider: config.label,
         model: config.model,
         warning: [
-          qualityIssues.length ? `文章仍有 ${qualityIssues.join("、")}，当前标记为作者工作稿，不建议直接发布。` : "",
           research.report.warnings.join("；"),
           research.sources.length ? "" : "联网检索暂未返回可读取来源，本文仅使用创作简报中的资料生成；发布前请补充并核对来源。",
         ].filter(Boolean).join(" ") || undefined,
       });
     } catch (finalEditError) {
       return json({
-        mode: "ai",
-        editorPass: "working-draft",
-        researchMode: research.sources.length ? "online" : "brief-only",
-        draft: workingDraft,
+        error: finalEditError instanceof Error
+          ? `读者成稿终审两次均未完成：${finalEditError.message}。已保留联网研究资料，请重试。`
+          : "读者成稿终审两次均未完成。已保留联网研究资料，请重试。",
+        code: "AI_FINAL_EDIT_FAILED",
+        retryable: true,
         researchSources: research.sources,
         researchReport: research.report,
-        provider: config.label,
-        model: config.model,
-        warning: finalEditError instanceof Error
-          ? `读者成稿终审未完成，当前仅为作者工作稿，不建议直接发布：${finalEditError.message}`
-          : "读者成稿终审未完成，当前仅为作者工作稿，不建议直接发布。",
-      });
+      }, { status: 502 });
     }
   } catch (error) {
     if (body.action === "draft") {

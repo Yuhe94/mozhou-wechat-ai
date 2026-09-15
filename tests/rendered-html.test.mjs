@@ -205,6 +205,29 @@ test("renumbers duplicate image slots in longer articles", async () => {
   }
 });
 
+test("recognizes an internal research draft before it can reach readers", async () => {
+  const { createServer } = await import("vite");
+  const vite = await createServer({ configFile: false, root: new URL("../", import.meta.url).pathname, logLevel: "silent", server: { middlewareMode: true } });
+  try {
+    const { looksLikeInternalWorkingDraft } = await vite.ssrLoadModule("/app/lib/article-draft.ts");
+    assert.equal(looksLikeInternalWorkingDraft({
+      title: "热搜“4点”内部核查",
+      digest: "本轮可核查的资料存在分歧",
+      sections: [
+        { heading: "待核与不宜采用的信息", paragraphs: ["待核一：原始研究出处。"] },
+        { heading: "供终审编辑重组的判断", paragraphs: ["以下只供编辑使用。"] },
+      ],
+    }), true);
+    assert.equal(looksLikeInternalWorkingDraft({
+      title: "糖尿病风险因素不能只看四个标签",
+      digest: "饮食、运动与体重需要结合个人情况理解。",
+      sections: [{ heading: "", paragraphs: ["这是一篇直接面向读者的短文。"] }],
+    }), false);
+  } finally {
+    await vite.close();
+  }
+});
+
 test("creates an editable narrative route with a non-fixed research task count", async () => {
   const { createServer } = await import("vite");
   const vite = await createServer({
@@ -475,7 +498,7 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /相关范例片段/);
   assert.match(generator, /FINAL_EDIT_SYSTEM/);
   assert.match(generator, /READER_ARTICLE_RULES/);
-  assert.match(generator, /editorPass: qualityIssues\.length/);
+  assert.match(generator, /editorPass: "final"/);
   assert.match(generator, /禁止使用“发生了什么”“为什么值得关注”/);
   assert.match(generator, /readerDraftIssues/);
   assert.match(generator, /上一版仍未通过成稿检查/);
@@ -483,7 +506,10 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /normalizeReaderDraft/);
   assert.match(generator, /AI_KEY_REQUIRED/);
   assert.match(generator, /AI_DRAFT_FAILED/);
+  assert.match(generator, /AI_FINAL_EDIT_FAILED/);
+  assert.match(generator, /AI_FINAL_QUALITY_FAILED/);
   assert.doesNotMatch(generator, /buildDemoDraft/);
+  assert.doesNotMatch(generator, /draft: workingDraft/);
   assert.match(generator, /discoverResearchSources/);
   assert.match(generator, /researchReport/);
   assert.match(generator, /collectOnlineResearch/);
