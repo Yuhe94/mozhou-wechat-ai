@@ -128,7 +128,10 @@ export function buildArticleHtml(snapshot: ArticleSnapshot, includeSlots = true)
         includeSlots && section.imageSlot
           ? `<section data-image-slot="${section.imageSlot}" style="margin:28px 0;padding:18px;border:1px dashed ${token.accent};border-radius:10px;text-align:center;color:${token.accent};background:${token.paper};"><strong style="font-size:14px;letter-spacing:.12em;">${section.imageSlot}</strong><br><span style="font-size:12px;opacity:.72;">请上传同名图片后删除本提示框</span></section>`
           : "";
-      return `<h2 style="margin:2em 0 .8em;padding-left:12px;border-left:4px solid ${token.accent};font-size:22px;line-height:1.45;color:${token.ink};">${escapeHtml(section.heading)}</h2>${paragraphs}${slot}`;
+      const heading = section.heading.trim()
+        ? `<h2 style="margin:2em 0 .8em;padding-left:12px;border-left:4px solid ${token.accent};font-size:22px;line-height:1.45;color:${token.ink};">${escapeHtml(section.heading)}</h2>`
+        : "";
+      return `${heading}${paragraphs}${slot}`;
     })
     .join("");
 
@@ -142,7 +145,8 @@ export function buildArticleMarkdown(snapshot: ArticleSnapshot) {
   const sections = snapshot.sections
     .map((section) => {
       const slot = section.imageSlot ? `\n\n> 【${section.imageSlot}】请上传 images/${section.imageSlot}-*.png 后删除此提示。` : "";
-      return `## ${section.heading}\n\n${section.paragraphs.join("\n\n")}${slot}`;
+      const heading = section.heading.trim() ? `## ${section.heading}\n\n` : "";
+      return `${heading}${section.paragraphs.join("\n\n")}${slot}`;
     })
     .join("\n\n");
   return `# ${snapshot.title}\n\n> ${snapshot.digest}\n\n${sections}\n\n${snapshot.aiDisclosure ? "_本文由 AI 辅助整理与生成，经作者人工编辑与审核。_\n" : ""}`;

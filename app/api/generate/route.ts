@@ -4,7 +4,7 @@ import {
   imageProviderConfig,
   textProviderConfig,
 } from "../../lib/ai-provider.server";
-import { buildDemoDraft, buildDemoOutline, buildDemoResearchPlan, buildDemoTopics } from "../../lib/demo-engine";
+import { buildDemoOutline, buildDemoResearchPlan, buildDemoTopics } from "../../lib/demo-engine";
 import { discoverResearchSources, researchPreferences } from "../../lib/news-research.server";
 import { assessResearchEvidence } from "../../lib/research-evidence";
 import type { Brief, OutlineItem, ResearchPlan, ResearchReport, ResearchSource, TopicAngle, WritingProfile, WritingStyleContext } from "../../lib/product-types";
@@ -172,7 +172,7 @@ async function collectOnlineResearch(
   return { sources: materials.map((material) => material.source), materials, report };
 }
 
-function readerDraftIssues(draft: Record<string, unknown>, internalAngle = "") {
+function readerDraftIssues(draft: Record<string, unknown>, internalAngle = "", requestedLength = "400–600 字") {
   const issues: string[] = [];
   const title = typeof draft.title === "string" ? draft.title.trim() : "";
   const sections = Array.isArray(draft.sections)
@@ -187,8 +187,9 @@ function readerDraftIssues(draft: Record<string, unknown>, internalAngle = "") {
   if (!title || title.length < 6) issues.push("标题过于空泛或缺失");
   if (internalAngle && title === internalAngle.trim()) issues.push("文章标题直接复制了内部研究角度");
   if (/别只盯着|真正值得关注的|先看懂/.test(title)) issues.push("标题仍在使用万能提醒式钩子");
-  if (sections.length < 3 || sections.length > 5) issues.push("正文应重新组织为 3–5 个自然段落组");
-  if (headings.some((heading) => TEMPLATE_HEADING_PATTERNS.some((pattern) => pattern.test(heading)))) {
+  const requestedMinimum = Number.parseInt(requestedLength.match(/\d+/)?.[0] ?? "400", 10);
+  if (sections.length < 1 || sections.length > 4) issues.push("正文应按信息量组织为 1–4 个自然段落组");
+  if (headings.filter(Boolean).some((heading) => TEMPLATE_HEADING_PATTERNS.some((pattern) => pattern.test(heading)))) {
     issues.push("小标题仍在复用作者提纲的万能栏目名");
   }
   const proseHits = TEMPLATE_PROSE_PATTERNS.filter((pattern) => pattern.test(fullText)).length;
@@ -196,7 +197,8 @@ function readerDraftIssues(draft: Record<string, unknown>, internalAngle = "") {
   if (/目前唯一可以确认|能确认的只有词条|只有词条存在|原话.{0,12}(?:查不到|没有可靠来源)/.test(fullText)) {
     issues.push("把检索失败和资料不足写进了面向读者的正文");
   }
-  if (paragraphs.length < 6) issues.push("正文段落过少，缺少适合手机阅读的自然停顿");
+  if (paragraphs.length < 1) issues.push("正文没有有效段落");
+  if (requestedMinimum > 600 && paragraphs.length < 3) issues.push("长文段落过少，论述尚未展开");
   return issues;
 }
 
@@ -240,7 +242,7 @@ function modeInstructions(brief: Brief) {
 
 const HUMAN_EDITOR_RULES = `按资深公众号主编的真实工作方式写：先判断读者为什么会点开、为什么会读下去，再组织信息。标题使用普通人会说、编辑敢发布的中文，优先具体对象、真实冲突、反常识或明确收益；除非主题确实是 AI，否则禁止把标题写成“某事：AI 如何……”。不要为了显得深刻而滥用冒号、引号、“从 A 到 B”、“不是……而是……”和口号。正文避免“在当今快速发展的时代”“随着时代的发展”“值得注意的是”“不难发现”“综上所述”“总而言之”等模型套话，少用赋能、重塑、闭环、底层逻辑、时代浪潮等抽象词。允许长短句不齐、短段停顿和有分寸的口语；每一段必须带来事实、动作、场景或新的判断，不做同义反复。`;
 
-const READER_ARTICLE_RULES = `最终交付物是给普通读者阅读的公众号文章，不是研究报告、政策简报、问答提纲或作者工作备忘录。大纲只负责告诉你“要讲什么”，不能决定正文“怎么说”；允许合并、拆分和调整章节顺序，禁止逐条扩写大纲。全文只保留 3–5 个真正帮助阅读的小标题，小标题必须包含当前主题的具体对象、矛盾或变化，禁止使用“发生了什么”“为什么值得关注”“影响会落在哪里”“接下来怎么看”“背景与已知信息”“核心问题”“判断边界”这类可套在任何主题上的栏目名。开头两段直接进入一个已知事实、具体变化、现场、人物动作或真实疑问，不介绍“本文将讨论什么”，不说“这条热搜本身并不复杂”。同一项不确定性只交代一次，不反复提醒“需要分清事实和判断”“目前仍说不准”。不要对读者进行居高临下的阅读指导，不使用“别只盯着”“真正值得留在心里”“愿意多查一步就已经……”式说教。结尾停在一个具体判断、仍待观察的现实问题或与读者有关的行动上，不写万能升华。段落长短必须有明显变化，允许 20–50 字短段，也允许 100–160 字完整论述；连续三段不得采用相同句式。`;
+const READER_ARTICLE_RULES = `最终交付物是给普通读者阅读的公众号文章，不是研究报告、政策简报、问答提纲或作者工作备忘录。大纲只负责告诉你“要讲什么”，不能决定正文“怎么说”；允许合并、拆分和调整章节顺序，禁止逐条扩写大纲。结构由实际信息量决定，禁止为了排版制造副标题：简单事件可以不设任何小标题，只写 1–2 个完整自然段；只有信息较复杂、确实发生叙事转折时才拆成 2–4 个小标题。小标题必须包含当前主题的具体对象、矛盾或变化，禁止使用“发生了什么”“为什么值得关注”“影响会落在哪里”“接下来怎么看”“背景与已知信息”“核心问题”“判断边界”这类可套在任何主题上的栏目名。开头直接进入一个已知事实、具体变化、现场、人物动作或真实疑问，不介绍“本文将讨论什么”，不说“这条热搜本身并不复杂”。同一项不确定性只交代一次，不反复提醒“需要分清事实和判断”“目前仍说不准”。不要对读者进行居高临下的阅读指导，不使用“别只盯着”“真正值得留在心里”“愿意多查一步就已经……”式说教。结尾停在一个具体判断、仍待观察的现实问题或与读者有关的行动上，不写万能升华。段落长短必须有明显变化，允许 20–50 字短段，也允许 100–200 字完整论述；连续三段不得采用相同句式。`;
 
 const FINAL_EDIT_SYSTEM = `你是头部公众号的终审编辑。你的任务不是润色几句话，而是把一份作者工作稿重新编辑成可以直接交给真实读者的完整文章。只输出合法 JSON，不要 Markdown。保留工作稿中有依据的事实与核心判断，不新增工作稿没有的数字、人物、引语、机构表态或确定性结论。删除写作过程说明、风险提示腔、提纲腔、机械过渡和空泛升华。不要保留工作稿原有章节结构，重新决定标题、开场、叙事顺序、小标题和收尾。${HUMAN_EDITOR_RULES}\n${READER_ARTICLE_RULES}`;
 
@@ -319,10 +321,17 @@ export async function POST(request: Request) {
 
   const generationBrief = normalizeBriefForGeneration(body.brief);
   const newsPreferences = researchPreferences(request.headers, environment);
+  let retainedDraftResearch: { sources: ResearchSource[]; report: ResearchReport } | null = null;
   let config;
   try {
     config = textProviderConfig(request.headers, environment);
     if (!config.apiKey) {
+      if (body.action === "draft") {
+        return json({
+          error: `当前请求没有收到 ${config.label} API Key，未生成正文。请在 AI 模型设置中填写并测试连接后重试。`,
+          code: "AI_KEY_REQUIRED",
+        }, { status: 400 });
+      }
       const fallback = demoResponse(body, generationBrief);
       const payload = await fallback.json();
       return json({
@@ -380,6 +389,7 @@ export async function POST(request: Request) {
         missingEvidence: generationBrief.creationMode === "hotspot" ? ["至少读取 2 篇与该热搜直接相关的文章或讨论"] : [],
       } satisfies ResearchReport,
     }));
+    retainedDraftResearch = { sources: research.sources, report: research.report };
     if (generationBrief.creationMode === "hotspot" && research.report.status === "insufficient") {
       return json({
         mode: "ai",
@@ -417,25 +427,25 @@ export async function POST(request: Request) {
       const finalOutput = await generateCompatibleText(
         config,
         `${FINAL_EDIT_SYSTEM}\n${modeInstructions(generationBrief)}\n${styleInstructions(body.styleContext)}`,
-        `创作主题：${generationBrief.topic}\n目标读者：${generationBrief.audience}\n文章目的：${generationBrief.goal}\n期望语气：${generationBrief.tone}\n预计篇幅：${generationBrief.length}\n用户行动：${generationBrief.callToAction}\n内部研究角度：${JSON.stringify(body.angle)}\n作者确定的核心追问与叙事路线：${JSON.stringify(body.researchPlan ?? {})}\n\n注意：研究角度和研究任务只是内部方向，绝不能直接复制为文章标题或章节。执行叙事路线，但不要在正文里解释路线；允许一个关键材料占据主要篇幅，其他材料只在必要时出现。以下是作者工作稿，只把它当作事实与观点素材，不沿用它的标题、章节名、段落顺序和模板表达：\n${JSON.stringify(workingDraft)}\n\n请完成终审重写，并在第 2、3 个适合的位置分别保留 IMG-01、IMG-02。输出 JSON 对象，格式为：{"draft":{"title":"研究完成后重新拟定的自然标题","digest":"80字以内摘要","sections":[{"id":"section-1","heading":"与当前主题强相关的自然小标题","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。正文总字数符合“${generationBrief.length}”，sections 为 3–5 项。不要输出解释、评分或修改说明。`,
+        `创作主题：${generationBrief.topic}\n目标读者：${generationBrief.audience}\n文章目的：${generationBrief.goal}\n期望语气：${generationBrief.tone}\n预计篇幅：${generationBrief.length}\n用户行动：${generationBrief.callToAction}\n内部研究角度：${JSON.stringify(body.angle)}\n作者确定的核心追问与叙事路线：${JSON.stringify(body.researchPlan ?? {})}\n\n注意：研究角度和研究任务只是内部方向，绝不能直接复制为文章标题或章节。执行叙事路线，但不要在正文里解释路线；允许一个关键材料占据主要篇幅，其他材料只在必要时出现。以下是作者工作稿，只把它当作事实与观点素材，不沿用它的标题、章节名、段落顺序和模板表达：\n${JSON.stringify(workingDraft)}\n\n请完成终审重写。简单事件可只输出 1–2 个 section，每个 section 写一个完整自然段且 heading 留空，不使用副标题；复杂文章才使用 2–4 个自然小标题。短文如需正文配图，只保留一次 IMG-01；较长文章再按需要使用 IMG-01、IMG-02，不要为了插图拆段。输出 JSON 对象，格式为：{"draft":{"title":"研究完成后重新拟定的自然标题","digest":"80字以内摘要","sections":[{"id":"section-1","heading":"可留空；仅复杂文章使用自然小标题","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。正文总字数符合“${generationBrief.length}”，sections 为 1–4 项。不要输出解释、评分或修改说明。`,
         7000,
         true,
       );
       const finalParsed = parseStructuredOutput(finalOutput);
       let draft = objectField<Record<string, unknown>>(finalParsed, "draft") ?? finalParsed;
-      let qualityIssues = readerDraftIssues(draft, body.angle.title);
+      let qualityIssues = readerDraftIssues(draft, body.angle.title, generationBrief.length);
 
       if (qualityIssues.length) {
         const repairOutput = await generateCompatibleText(
           config,
           FINAL_EDIT_SYSTEM,
-          `上一版仍未通过成稿检查，问题是：${qualityIssues.join("；")}。\n\n请基于下面这版文章重新编辑，不新增其中没有的事实。重点打散模板结构、删除说教和元话语，并使用只属于当前主题的小标题：\n${JSON.stringify(draft)}\n\n仍只输出指定 JSON：{"draft":{"title":"标题","digest":"摘要","sections":[{"id":"section-1","heading":"自然小标题","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。sections 为 3–5 项，IMG-01 与 IMG-02 各保留一次。`,
+          `上一版仍未通过成稿检查，问题是：${qualityIssues.join("；")}。\n\n请基于下面这版文章重新编辑，不新增其中没有的事实。重点打散模板结构、删除说教和元话语；简单事件不设小标题，只保留 1–2 个完整段落，复杂文章才使用真正有必要的小标题：\n${JSON.stringify(draft)}\n\n仍只输出指定 JSON：{"draft":{"title":"标题","digest":"摘要","sections":[{"id":"section-1","heading":"简单文章留空","paragraphs":["正文段落"],"imageSlot":"IMG-01"}]}}。sections 为 1–4 项；短文最多保留 IMG-01，不要为了图片拆段。`,
           7000,
           true,
         );
         const repairedParsed = parseStructuredOutput(repairOutput);
         draft = objectField<Record<string, unknown>>(repairedParsed, "draft") ?? repairedParsed;
-        qualityIssues = readerDraftIssues(draft, body.angle.title);
+        qualityIssues = readerDraftIssues(draft, body.angle.title, generationBrief.length);
       }
 
       return json({
@@ -469,6 +479,17 @@ export async function POST(request: Request) {
       });
     }
   } catch (error) {
+    if (body.action === "draft") {
+      return json({
+        error: error instanceof Error
+          ? `正式成稿失败，未使用演示内容：${error.message}`
+          : "正式成稿失败，未使用演示内容。请检查模型设置后重试。",
+        code: "AI_DRAFT_FAILED",
+        retryable: true,
+        researchSources: retainedDraftResearch?.sources ?? [],
+        researchReport: retainedDraftResearch?.report,
+      }, { status: 502 });
+    }
     const fallback = demoResponse(body, generationBrief);
     const payload = await fallback.json();
     return json({
@@ -480,12 +501,12 @@ export async function POST(request: Request) {
   }
 }
 
-function demoResponse(body: Exclude<GenerateBody, { action: "image" } | { action: "style-profile" }>, brief = body.brief) {
+function demoResponse(body: Extract<GenerateBody, { action: "topics" } | { action: "outline" }>, brief = body.brief) {
   if (body.action === "topics") return json({ mode: "demo", topics: buildDemoTopics(brief) });
   if (body.action === "outline") return json({
     mode: "demo",
     researchPlan: buildDemoResearchPlan(brief, body.angle),
     outline: buildDemoOutline(body.angle, brief),
   });
-  return json({ mode: "demo", draft: buildDemoDraft(brief, body.angle, body.outline) });
+  return json({ mode: "demo", researchPlan: buildDemoResearchPlan(brief, body.angle), outline: buildDemoOutline(body.angle, brief) });
 }

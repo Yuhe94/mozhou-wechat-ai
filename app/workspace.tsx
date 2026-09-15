@@ -94,6 +94,23 @@ type NewWritingExample = {
   source: WritingExampleSource;
 };
 
+type GenerationErrorPayload = {
+  error?: string;
+  code?: "AI_KEY_REQUIRED" | "AI_DRAFT_FAILED";
+  researchSources?: ResearchSource[];
+  researchReport?: ResearchReport;
+};
+
+class GenerationRequestError extends Error {
+  payload: GenerationErrorPayload;
+
+  constructor(message: string, payload: GenerationErrorPayload) {
+    super(message);
+    this.name = "GenerationRequestError";
+    this.payload = payload;
+  }
+}
+
 const EMPTY_STYLE_LIBRARY: StyleLibraryData = {
   examples: [],
   profile: null,
@@ -201,6 +218,22 @@ function resetGeneratedContent(
   };
 }
 
+function withoutLegacyDemoDraft(snapshot: ArticleSnapshot): ArticleSnapshot {
+  const placeholder = snapshot.generationMode === "demo" && (
+    /正式动笔前，还需要补齐这些事实/.test(snapshot.title)
+    || /按照背景、核心问题、现实影响和后续判断四个层次/.test(snapshot.digest)
+  );
+  if (!placeholder) return snapshot;
+  return {
+    ...snapshot,
+    title: "",
+    digest: "",
+    sections: [],
+    images: [],
+    step: snapshot.outline.length ? "outline" : "brief",
+  };
+}
+
 export default function Workspace({ displayName }: { displayName: string }) {
   const [snapshot, setSnapshot] = useState<ArticleSnapshot>(() => createBlankSnapshot());
   const [articleId, setArticleId] = useState<string | null>(null);
@@ -253,7 +286,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
         setArticles(data.articles);
         if (data.articles[0]) {
           setArticleId(data.articles[0].id);
-          setSnapshot(data.articles[0].snapshot);
+          setSnapshot(withoutLegacyDemoDraft(data.articles[0].snapshot));
         } else {
           const initial = { ...createBlankSnapshot(), updatedAt: new Date().toISOString() };
           const created = await fetch("/api/articles", {
@@ -317,8 +350,9 @@ export default function Workspace({ displayName }: { displayName: string }) {
       headers: { "content-type": "application/json", ...generationHeaders(aiSettings) },
       body: JSON.stringify(payload),
     });
-    if (!response.ok) throw new Error((await response.json()).error || "生成失败");
-    return (await response.json()) as T;
+    const data = await response.json().catch(() => ({})) as T & GenerationErrorPayload;
+    if (!response.ok) throw new GenerationRequestError(data.error || "生成失败", data);
+    return data as T;
   };
 
   const loadStyleLibrary = useCallback(async () => {
@@ -704,6 +738,22 @@ export default function Workspace({ displayName }: { displayName: string }) {
         text: data.warning || "双轮编辑已完成：作者工作稿已重写为面向读者的成稿。",
       });
     } catch (error) {
+      if (error instanceof GenerationRequestError) {
+        if (error.payload.researchSources?.length || error.payload.researchReport) {
+          updateSnapshot((current) => ({
+            ...withoutLegacyDemoDraft(current),
+            researchSources: error.payload.researchSources ?? current.researchSources,
+            researchReport: error.payload.researchReport ?? current.researchReport,
+            step: "outline",
+          }));
+        }
+        if (error.payload.code === "AI_KEY_REQUIRED") {
+          updateSnapshot((current) => withoutLegacyDemoDraft(current));
+          setSettingsDraft(aiSettings);
+          setProviderTest({ status: "idle", text: "" });
+          setSettingsOpen(true);
+        }
+      }
       setNotice({ type: "error", text: error instanceof Error ? error.message : "正文生成失败" });
     } finally {
       setBusy(null);
@@ -759,10 +809,10 @@ export default function Workspace({ displayName }: { displayName: string }) {
             id: section.imageSlot!.toLowerCase(),
             slot: section.imageSlot!,
             kind: "inline" as const,
-            filename: `${section.imageSlot}-${section.heading.slice(0, 12).replace(/\s+/g, "-")}.png`,
-            title: section.heading,
-            caption: `配图：${section.heading}`,
-            prompt: `微信公众号正文插图，表达“${section.heading}”。围绕${snapshot.brief.topic}，${snapshot.brief.tone}，不出现文字。`,
+            filename: `${section.imageSlot}-${(section.heading.trim() || snapshot.brief.topic).slice(0, 12).replace(/\s+/g, "-")}.png`,
+            title: section.heading.trim() || snapshot.brief.topic,
+            caption: `配图：${section.heading.trim() || snapshot.brief.topic}`,
+            prompt: `微信公众号正文插图，表达“${section.heading.trim() || snapshot.brief.topic}”。围绕${snapshot.brief.topic}，${snapshot.brief.tone}，不出现文字。`,
           })),
       ];
       const results = await Promise.all(planned.map((image, index) => createAndStoreImage(image, index)));
@@ -803,7 +853,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
 
   const openArticle = (article: StoredArticle) => {
     setArticleId(article.id);
-    setSnapshot(article.snapshot);
+    setSnapshot(withoutLegacyDemoDraft(article.snapshot));
     setMobileNav(false);
   };
 
@@ -1342,7 +1392,7 @@ function AiSettingsDialog({
               <label className="settings-field"><span>重点地区</span><select value={settings.newsRegion} onChange={(event) => onChange({ newsRegion: event.target.value as NewsRegionId })}><option value="auto">根据选题自动识别</option><option value="cn">中国大陆</option><option value="hk">中国香港</option><option value="tw">中国台湾</option><option value="all">大陆 / 香港 / 台湾</option></select></label>
               {settings.newsSearchProvider !== "public" ? <label className="settings-field full"><span>Brave Search API Key{settings.newsSearchProvider === "auto" ? "（选填）" : ""}</span><div className="secret-input"><input type={showKeys ? "text" : "password"} value={settings.newsSearchApiKey} onChange={(event) => onChange({ newsSearchApiKey: event.target.value })} autoComplete="off" placeholder={settings.newsSearchProvider === "auto" ? "留空时使用区域官方源和 GDELT 降级检索" : "BSA-..."} /><button type="button" onClick={() => setShowKeys((current) => !current)}>{showKeys ? "隐藏" : "显示"}</button></div></label> : null}
             </div>
-            <p className="settings-hint">热点模式先读取今日头条站内相关文章，并搜索公开公众号文章；微博或公众号遇到访客验证时会明确提示。随后加入区域官方源；有 Brave Key 时补充商业新闻搜索，没有 Key 时才使用 GDELT。只有取得至少两篇有效正文才会成稿。</p>
+            <p className="settings-hint">热点模式先读取今日头条站内相关文章，并搜索公开公众号文章；微博或公众号遇到访客验证时会明确提示。随后加入区域官方源；有 Brave Key 时补充商业新闻搜索，没有 Key 时才使用 GDELT。系统会按可读正文、独立发布者和多来源摘要综合判断能否成稿。</p>
           </section>
 
           <section className="settings-section">
@@ -1657,7 +1707,7 @@ function DraftStage({ snapshot, busy, onTitle, onDigest, onSection, onBack, onGe
         {snapshot.sections.map((section, index) => (
           <div className="section-editor" key={section.id}>
             <div className="section-meta"><span>SECTION {String(index + 1).padStart(2, "0")}</span>{section.imageSlot && <span className="slot-chip"><ImageIcon size={13} /> {section.imageSlot}</span>}</div>
-            <input className="section-heading-input" value={section.heading} onChange={(event) => onSection(index, "heading", event.target.value)} aria-label={`第 ${index + 1} 节标题`} />
+            <input className="section-heading-input" value={section.heading} onChange={(event) => onSection(index, "heading", event.target.value)} aria-label={`第 ${index + 1} 节标题`} placeholder="简单文章可留空，不显示小标题" />
             <textarea value={section.paragraphs.join("\n\n")} onChange={(event) => onSection(index, "paragraphs", event.target.value)} rows={Math.max(6, section.paragraphs.join("\n").length / 42)} aria-label={`第 ${index + 1} 节正文`} />
           </div>
         ))}
@@ -1717,7 +1767,7 @@ function PreviewPane({ snapshot }: { snapshot: ArticleSnapshot }) {
             {snapshot.digest && <p className="phone-digest">{snapshot.digest}</p>}
             {snapshot.sections.length ? snapshot.sections.map((section) => {
               const image = section.imageSlot ? inlineBySlot.get(section.imageSlot) : undefined;
-              return <section key={section.id}><h2>{section.heading}</h2>{section.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{section.imageSlot && (image?.url ? <figure><img src={image.url} alt={image.caption} /><figcaption>{image.caption}</figcaption></figure> : <div className="phone-slot"><ImageIcon size={18} /><span>{section.imageSlot}</span></div>)}</section>;
+              return <section key={section.id}>{section.heading.trim() ? <h2>{section.heading}</h2> : null}{section.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{section.imageSlot && (image?.url ? <figure><img src={image.url} alt={image.caption} /><figcaption>{image.caption}</figcaption></figure> : <div className="phone-slot"><ImageIcon size={18} /><span>{section.imageSlot}</span></div>)}</section>;
             }) : <EmptyPreview snapshot={snapshot} />}
             {snapshot.aiDisclosure && snapshot.sections.length > 0 && <p className="phone-disclosure">本文由 AI 辅助整理与生成，经作者人工编辑与审核。</p>}
           </article>

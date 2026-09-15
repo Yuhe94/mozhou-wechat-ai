@@ -147,6 +147,22 @@ test("returns upstream HTTP errors without exposing API keys", async () => {
   }
 });
 
+test("renders a short article without an empty subtitle", async () => {
+  const { createServer } = await import("vite");
+  const vite = await createServer({ configFile: false, root: new URL("../", import.meta.url).pathname, logLevel: "silent", server: { middlewareMode: true } });
+  try {
+    const { buildArticleHtml, buildArticleMarkdown } = await vite.ssrLoadModule("/app/lib/publish-package.client.ts");
+    const snapshot = { title: "一条简单消息", digest: "简短说明", theme: "paper", aiDisclosure: false, sections: [{ id: "section-1", heading: "", paragraphs: ["第一段直接说明事件。", "第二段补充必要背景。"] }] };
+    const html = buildArticleHtml(snapshot, true);
+    const markdown = buildArticleMarkdown(snapshot);
+    assert.doesNotMatch(html, /<h2/);
+    assert.doesNotMatch(markdown, /^## /m);
+    assert.match(html, /第一段直接说明事件/);
+  } finally {
+    await vite.close();
+  }
+});
+
 test("creates an editable narrative route with a non-fixed research task count", async () => {
   const { createServer } = await import("vite");
   const vite = await createServer({
@@ -421,6 +437,10 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /禁止使用“发生了什么”“为什么值得关注”/);
   assert.match(generator, /readerDraftIssues/);
   assert.match(generator, /上一版仍未通过成稿检查/);
+  assert.match(generator, /简单事件可以不设任何小标题/);
+  assert.match(generator, /AI_KEY_REQUIRED/);
+  assert.match(generator, /AI_DRAFT_FAILED/);
+  assert.doesNotMatch(generator, /buildDemoDraft/);
   assert.match(generator, /discoverResearchSources/);
   assert.match(generator, /researchReport/);
   assert.match(generator, /collectOnlineResearch/);
