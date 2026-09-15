@@ -163,6 +163,48 @@ test("renders a short article without an empty subtitle", async () => {
   }
 });
 
+test("hard-normalizes short articles and removes duplicate image slots", async () => {
+  const { createServer } = await import("vite");
+  const vite = await createServer({ configFile: false, root: new URL("../", import.meta.url).pathname, logLevel: "silent", server: { middlewareMode: true } });
+  try {
+    const { normalizeReaderDraft } = await vite.ssrLoadModule("/app/lib/article-draft.ts");
+    const draft = normalizeReaderDraft({
+      title: "塔克拉玛干发现了大型地下水水源？先等等",
+      digest: "一条简讯",
+      sections: [
+        { id: "a", heading: "第一部分", paragraphs: ["第一段说明消息来源。", "配图：塔克拉玛干沙漠"], imageSlot: "IMG-01" },
+        { id: "b", heading: "第二部分", paragraphs: ["第二段补充已有背景。"], imageSlot: "IMG-01" },
+        { id: "c", heading: "第三部分", paragraphs: ["第三段给出有限判断。"], imageSlot: "IMG-02" },
+      ],
+    }, "400–600 字");
+    assert.equal(draft.title, "塔克拉玛干发现了大型地下水水源？");
+    assert.equal(draft.sections.length, 2);
+    assert.ok(draft.sections.every((section) => section.heading === ""));
+    assert.equal(draft.sections.flatMap((section) => section.paragraphs).length, 2);
+    assert.deepEqual(draft.sections.flatMap((section) => section.imageSlot ? [section.imageSlot] : []), ["IMG-01"]);
+    assert.doesNotMatch(JSON.stringify(draft), /配图：/);
+    assert.match(JSON.stringify(draft), /第三段给出有限判断/);
+  } finally {
+    await vite.close();
+  }
+});
+
+test("renumbers duplicate image slots in longer articles", async () => {
+  const { createServer } = await import("vite");
+  const vite = await createServer({ configFile: false, root: new URL("../", import.meta.url).pathname, logLevel: "silent", server: { middlewareMode: true } });
+  try {
+    const { normalizeReaderDraft } = await vite.ssrLoadModule("/app/lib/article-draft.ts");
+    const draft = normalizeReaderDraft({ sections: [
+      { id: "a", heading: "一", paragraphs: ["甲"], imageSlot: "IMG-01" },
+      { id: "b", heading: "二", paragraphs: ["乙"], imageSlot: "IMG-01" },
+      { id: "c", heading: "三", paragraphs: ["丙"], imageSlot: "IMG-03" },
+    ] }, "1200–1600 字");
+    assert.deepEqual(draft.sections.flatMap((section) => section.imageSlot ? [section.imageSlot] : []), ["IMG-01", "IMG-02"]);
+  } finally {
+    await vite.close();
+  }
+});
+
 test("creates an editable narrative route with a non-fixed research task count", async () => {
   const { createServer } = await import("vite");
   const vite = await createServer({
@@ -437,7 +479,8 @@ test("ships a persistent writing-example library and injects its style into gene
   assert.match(generator, /禁止使用“发生了什么”“为什么值得关注”/);
   assert.match(generator, /readerDraftIssues/);
   assert.match(generator, /上一版仍未通过成稿检查/);
-  assert.match(generator, /简单事件可以不设任何小标题/);
+  assert.match(generator, /400–600 字短讯必须取消全部小标题/);
+  assert.match(generator, /normalizeReaderDraft/);
   assert.match(generator, /AI_KEY_REQUIRED/);
   assert.match(generator, /AI_DRAFT_FAILED/);
   assert.doesNotMatch(generator, /buildDemoDraft/);

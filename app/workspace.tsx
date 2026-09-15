@@ -793,6 +793,22 @@ export default function Workspace({ displayName }: { displayName: string }) {
     if (!snapshot.sections.length) return;
     setBusy("images");
     try {
+      const seenInlineSlots = new Set<string>();
+      const inlinePlans: Array<Omit<GeneratedImage, "url" | "source">> = snapshot.sections
+        .filter((section) => {
+          if (!section.imageSlot || seenInlineSlots.has(section.imageSlot)) return false;
+          seenInlineSlots.add(section.imageSlot);
+          return true;
+        })
+        .map((section) => ({
+          id: section.imageSlot!.toLowerCase(),
+          slot: section.imageSlot!,
+          kind: "inline" as const,
+          filename: `${section.imageSlot}-${(section.heading.trim() || snapshot.brief.topic).slice(0, 12).replace(/\s+/g, "-")}.png`,
+          title: section.heading.trim() || snapshot.brief.topic,
+          caption: `配图：${section.heading.trim() || snapshot.brief.topic}`,
+          prompt: `微信公众号正文插图，表达“${section.heading.trim() || snapshot.brief.topic}”。围绕${snapshot.brief.topic}，${snapshot.brief.tone}，不出现文字。`,
+        }));
       const planned: Array<Omit<GeneratedImage, "url" | "source">> = [
         {
           id: "cover",
@@ -803,17 +819,7 @@ export default function Workspace({ displayName }: { displayName: string }) {
           caption: "文章封面",
           prompt: `编辑设计风格的公众号封面，主题为：${snapshot.title}。${snapshot.brief.tone}，留白充足，具有清晰的视觉中心。`,
         },
-        ...snapshot.sections
-          .filter((section) => section.imageSlot)
-          .map((section) => ({
-            id: section.imageSlot!.toLowerCase(),
-            slot: section.imageSlot!,
-            kind: "inline" as const,
-            filename: `${section.imageSlot}-${(section.heading.trim() || snapshot.brief.topic).slice(0, 12).replace(/\s+/g, "-")}.png`,
-            title: section.heading.trim() || snapshot.brief.topic,
-            caption: `配图：${section.heading.trim() || snapshot.brief.topic}`,
-            prompt: `微信公众号正文插图，表达“${section.heading.trim() || snapshot.brief.topic}”。围绕${snapshot.brief.topic}，${snapshot.brief.tone}，不出现文字。`,
-          })),
+        ...inlinePlans,
       ];
       const results = await Promise.all(planned.map((image, index) => createAndStoreImage(image, index)));
       const generated = results.map((result) => result.asset);
